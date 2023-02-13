@@ -37,6 +37,7 @@ MODULE qs_energy_utils
                                               qs_rho_type
    USE qs_scf,                          ONLY: scf
    USE qs_tddfpt2_methods,              ONLY: tddfpt
+   USE qs_tddfpt2_soc,                  ONLY: tddfpt_soc
    USE tip_scan_methods,                ONLY: tip_scanning
    USE xas_methods,                     ONLY: xas
    USE xas_tdp_methods,                 ONLY: xas_tdp
@@ -70,14 +71,14 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'qs_energies_properties'
 
       INTEGER                                            :: handle
-      LOGICAL                                            :: do_et, do_et_proj, do_tip_scan
+      LOGICAL                                            :: do_et,do_et_proj, do_tip_scan,do_soc
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(pw_type), POINTER                             :: v_hartree_rspace
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(section_vals_type), POINTER                   :: input, proj_section, rest_b_section, &
-                                                            tip_scan_section
+                                                            tip_scan_section,soc_section
 
       NULLIFY (atprop, energy, pw_env)
       CALL timeset(routineN, handle)
@@ -154,7 +155,14 @@ CONTAINS
       END IF
 
       IF (dft_control%tddfpt2_control%enabled) THEN
-         CALL tddfpt(qs_env, calc_forces)
+         NULLIFY (soc_section)
+         soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
+         CALL section_vals_get(soc_section, explicit=do_soc)
+         IF (do_soc) THEN
+            CALL tddfpt_soc(qs_env)
+         ELSE
+           CALL tddfpt(qs_env, calc_forces)
+         END IF
       END IF
 
       ! tip scan
