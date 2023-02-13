@@ -114,7 +114,7 @@ MODULE qs_tddfpt2_methods
    INTEGER, PARAMETER, PRIVATE          :: nderivs = 3
    INTEGER, PARAMETER, PRIVATE          :: maxspins = 2
 
-   PUBLIC :: tddfpt
+   PUBLIC :: tddfpt, tddfpt_energies, tddfpt_input, kernel_info
 
 ! **************************************************************************************************
 
@@ -136,22 +136,22 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'tddfpt'
 
-      CHARACTER(len=20)                                  :: nstates_str
-      INTEGER                                            :: energy_unit, handle, ispin, istate, &
-                                                            iter, log_unit, mult, my_state, nao, &
-                                                            niters, nspins, nstates, nstates_read, &
+      INTEGER                                            :: handle, ispin, istate, &
+                                                            log_unit, mult, my_state, nao, &
+                                                            nspins, nstates, &
                                                             old_state
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
-                                                            explicit, is_restarted, state_change
-      REAL(kind=dp)                                      :: conv
+                                                            state_change, do_soc
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: ostrength_sing, ostrength_trip
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: my_mos
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ, evects, S_evects
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: evects_sing,evects_trip
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_ks_oep, matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -160,9 +160,9 @@ CONTAINS
       TYPE(kernel_env_type)                              :: kernel_env
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(qs_scf_env_type), POINTER                     :: scf_env
-      TYPE(section_vals_type), POINTER                   :: lri_section, namd_print_section, &
+      TYPE(section_vals_type), POINTER                   :: lri_section, &
                                                             tddfpt_print_section, tddfpt_section, &
-                                                            xc_section
+                                                            xc_section, soc_section
       TYPE(stda_env_type), TARGET                        :: stda_kernel
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
@@ -337,143 +337,58 @@ CONTAINS
          CALL tddfpt2_lri_init(qs_env, kernel_env, lri_section, tddfpt_print_section)
       END IF
 
-      ALLOCATE (evals(nstates))
-      ALLOCATE (evects(nspins, nstates), S_evects(nspins, nstates))
-      DO istate = 1, nstates
-         DO ispin = 1, nspins
-            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, S_evects(ispin, istate))
-         END DO
-      END DO
-
-      ! reuse Ritz vectors from the previous calculation if available
-      IF (tddfpt_control%is_restart) THEN
-         nstates_read = tddfpt_read_restart(evects=evects, evals=evals, gs_mos=gs_mos, &
-                                            logger=logger, tddfpt_section=tddfpt_section, &
-                                            tddfpt_print_section=tddfpt_print_section, &
-                                            fm_pool_ao_mo_occ=work_matrices%fm_pool_ao_mo_occ, &
-                                            blacs_env_global=blacs_env)
-      ELSE
-         nstates_read = 0
-      END IF
-
-      is_restarted = nstates_read >= nstates
-
-      ! build the list of missed singly excited states and sort them in ascending order
-      ! according to their excitation energies
-      log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "GUESS_VECTORS", extension=".tddfptLog")
-      CALL tddfpt_guess_vectors(evects=evects, evals=evals, gs_mos=gs_mos, log_unit=log_unit)
-      CALL cp_print_key_finished_output(log_unit, logger, tddfpt_print_section, "GUESS_VECTORS")
-
-      CALL tddfpt_orthogonalize_psi1_psi0(evects, work_matrices%S_C0_C0T)
-      CALL tddfpt_orthonormalize_psi1_psi1(evects, nstates, S_evects, matrix_s(1)%matrix)
-
-      niters = tddfpt_control%niters
-      IF (niters > 0) THEN
-         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "ITERATION_INFO", extension=".tddfptLog")
-         energy_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "DETAILED_ENERGY", extension=".tddfptLog")
-
+       soc_section => section_vals_get_subs_vals(tddfpt_section, "SOC")
+       CALL section_vals_get(soc_section, explicit=do_soc)
+      
+      IF (do_soc) then
+         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
          IF (log_unit > 0) THEN
             WRITE (log_unit, "(1X,A)") "", &
                "-------------------------------------------------------------------------------", &
-               "-                      TDDFPT WAVEFUNCTION OPTIMIZATION                       -", &
+               "-                      TDDFPT SINGLET ENERGIES                       -", &
                "-------------------------------------------------------------------------------"
-
-            WRITE (log_unit, '(/,T11,A,T27,A,T40,A,T62,A)') "Step", "Time", "Convergence", "Conv. states"
-            WRITE (log_unit, '(1X,79("-"))')
          END IF
 
-         CALL cp_add_iter_level(logger%iter_info, "TDDFT_SCF")
-
-         DO
-            ! *** perform Davidson iterations ***
-            conv = tddfpt_davidson_solver(evects=evects, evals=evals, S_evects=S_evects, gs_mos=gs_mos, &
-                                          tddfpt_control=tddfpt_control, &
-                                          matrix_ks=matrix_ks, qs_env=qs_env, &
-                                          kernel_env=kernel_env, &
-                                          sub_env=sub_env, logger=logger, &
-                                          iter_unit=log_unit, energy_unit=energy_unit, &
-                                          tddfpt_print_section=tddfpt_print_section, &
-                                          work_matrices=work_matrices)
-
-            ! at this point at least one of the following conditions are met:
-            ! a) convergence criteria has been achieved;
-            ! b) maximum number of iterations has been reached;
-            ! c) Davidson iterations must be restarted due to lack of Krylov vectors or numerical instability
-
-            CALL cp_iterate(logger%iter_info, increment=0, iter_nr_out=iter)
-            ! terminate the loop if either (a) or (b) is true ...
-            IF ((conv <= tddfpt_control%conv .AND. is_restarted) .OR. iter >= niters) EXIT
-
-            ! ... otherwise restart Davidson iterations
-            is_restarted = .TRUE.
-            IF (log_unit > 0) THEN
-               WRITE (log_unit, '(1X,25("-"),1X,A,1X,25("-"))') "Restart Davidson iterations"
-               CALL m_flush(log_unit)
-            END IF
-         END DO
-
-         ! write TDDFPT restart file at the last iteration if requested to do so
-         CALL cp_iterate(logger%iter_info, increment=0, last=.TRUE.)
-         CALL tddfpt_write_restart(evects=evects, evals=evals, gs_mos=gs_mos, &
-                                   logger=logger, tddfpt_print_section=tddfpt_print_section)
-
-         CALL cp_rm_iter_level(logger%iter_info, "TDDFT_SCF")
-
-         ! print convergence summary
-         IF (log_unit > 0) THEN
-            CALL integer_to_string(iter, nstates_str)
-            IF (conv <= tddfpt_control%conv) THEN
-               WRITE (log_unit, "(1X,A)") "", &
-                  "-------------------------------------------------------------------------------", &
-                  "-  TDDFPT run converged in "//TRIM(nstates_str)//" iteration(s) ", &
-                  "-------------------------------------------------------------------------------"
-            ELSE
-               WRITE (log_unit, "(1X,A)") "", &
-                  "-------------------------------------------------------------------------------", &
-                  "-  TDDFPT run did NOT converge after "//TRIM(nstates_str)//" iteration(s) ", &
-                  "-------------------------------------------------------------------------------"
-            END IF
+         tddfpt_control%rks_triplets = .FALSE.
+         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+   tddfpt_control, logger, tddfpt_print_section, evects_sing, evals, &
+   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+   sub_env, ostrength_sing, dipole_op_mos_occ, 1)
+   log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
+      IF (log_unit > 0) THEN
+            WRITE (log_unit, "(1X,A)") "", &
+               "-------------------------------------------------------------------------------", &
+               "-                      TDDFPT TRIPLET ENERGIES                       -", &
+               "-------------------------------------------------------------------------------"
          END IF
-
-         CALL cp_print_key_finished_output(energy_unit, logger, tddfpt_print_section, "DETAILED_ENERGY")
-         CALL cp_print_key_finished_output(log_unit, logger, tddfpt_print_section, "ITERATION_INFO")
+         tddfpt_control%rks_triplets = .TRUE.
+         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+   tddfpt_control, logger, tddfpt_print_section, evects_trip, evals, &
+   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+   sub_env, ostrength_trip, dipole_op_mos_occ, 3)
       ELSE
-         CALL cp_warn(__LOCATION__, "Skipping TDDFPT wavefunction optimization")
-      END IF
-
-      IF (ASSOCIATED(matrix_ks_oep) .AND. tddfpt_control%dipole_form == tddfpt_dipole_velocity) THEN
-         CALL cp_warn(__LOCATION__, &
-                      "Transition dipole moments and oscillator strengths are likely to be incorrect "// &
-                      "when computed using an orbital energy correction XC-potential together with "// &
-                      "the velocity form of dipole transition integrals")
-      END IF
-
-      ! *** print summary information ***
-      log_unit = cp_logger_get_default_io_unit()
-
-      namd_print_section => section_vals_get_subs_vals(tddfpt_print_section, "NAMD_PRINT")
-      CALL section_vals_get(namd_print_section, explicit=explicit)
-      IF (explicit) THEN
-         CALL tddfpt_write_newtonx_output(evects, evals, gs_mos, logger, tddfpt_print_section, &
-                                          matrix_s(1)%matrix, S_evects, sub_env) !qs_env, sub_env)
-      END IF
-      ALLOCATE (ostrength(nstates))
-      ostrength = 0.0_dp
-      CALL tddfpt_print_summary(log_unit, evects, evals, ostrength, mult, &
-                                dipole_op_mos_occ, tddfpt_control%dipole_form)
-      CALL tddfpt_print_excitation_analysis(log_unit, evects, evals, gs_mos, matrix_s(1)%matrix, &
-                                            min_amplitude=tddfpt_control%min_excitation_amplitude)
-      CALL tddfpt_print_nto_analysis(qs_env, evects, evals, ostrength, gs_mos, matrix_s(1)%matrix, &
-                                     tddfpt_print_section)
-
-      IF (tddfpt_control%do_lrigpw) THEN
-         CALL lri_print_stat(qs_env, ltddfpt=.TRUE., tddfpt_lri_env=kernel_env%full_kernel%lri_env)
+      CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+   tddfpt_control, logger, tddfpt_print_section, evects, evals, &
+   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+   sub_env, ostrength, dipole_op_mos_occ, mult)
       END IF
 
       !print forces for selected states
       IF (calc_forces) THEN
-         CALL tddfpt_print_forces(qs_env, evects, evals, ostrength, tddfpt_print_section, &
+         IF (.NOT. do_soc) THEN
+            CALL tddfpt_print_forces(qs_env, evects, evals, ostrength, tddfpt_print_section, &
                                   gs_mos, kernel_env, sub_env, work_matrices)
+         ELSE
+            IF (mult == 1) THEN
+               CALL tddfpt_print_forces(qs_env, evects_sing, evals,  &
+                                  ostrength_sing, tddfpt_print_section, &
+                                  gs_mos, kernel_env, sub_env, work_matrices)
+            ELSE
+               CALL tddfpt_print_forces(qs_env, evects_trip, evals,  &
+                                  ostrength_trip, tddfpt_print_section, &
+                                  gs_mos, kernel_env, sub_env, work_matrices)
+            END IF
+         END IF
       END IF
 
       ! excited state potential energy surface
@@ -491,7 +406,15 @@ CONTAINS
          ELSEIF (ex_env%state < 0) THEN
             ! state following
             my_state = ABS(ex_env%state)
-            CALL assign_state(qs_env, matrix_s, evects, mos, ex_env%fingerprint, my_state)
+            IF (.NOT. do_soc) THEN
+               CALL assign_state(qs_env, matrix_s, evects, mos, ex_env%fingerprint, my_state)
+            ELSE
+               IF (mult == 1) THEN
+                  CALL assign_state(qs_env, matrix_s, evects_sing, mos, ex_env%fingerprint, my_state)
+               ELSE
+                  CALL assign_state(qs_env, matrix_s, evects_trip, mos, ex_env%fingerprint, my_state)
+               END IF
+            END IF
             IF (my_state /= ABS(ex_env%state)) THEN
                state_change = .TRUE.
                old_state = ABS(ex_env%state)
@@ -513,9 +436,21 @@ CONTAINS
          CALL cp_fm_release(ex_env%evect)
          ALLOCATE (ex_env%evect(nspins))
          DO ispin = 1, nspins
-            CALL cp_fm_get_info(matrix=evects(ispin, 1), matrix_struct=matrix_struct)
-            CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
-            CALL cp_fm_to_fm(evects(ispin, my_state), ex_env%evect(ispin))
+            IF (do_soc) THEN
+               IF (mult == 1) THEN
+                  CALL cp_fm_get_info(matrix=evects_sing(ispin, 1), matrix_struct=matrix_struct)
+                  CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
+                  CALL cp_fm_to_fm(evects_sing(ispin, my_state), ex_env%evect(ispin))
+               ELSE
+                  CALL cp_fm_get_info(matrix=evects_sing(ispin, 1), matrix_struct=matrix_struct)
+                  CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
+                  CALL cp_fm_to_fm(evects_sing(ispin, my_state), ex_env%evect(ispin))
+               END IF
+            ELSE
+               CALL cp_fm_get_info(matrix=evects(ispin, 1), matrix_struct=matrix_struct)
+               CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
+               CALL cp_fm_to_fm(evects(ispin, my_state), ex_env%evect(ispin))
+            END IF
          END DO
 
          IF (log_unit > 0) THEN
@@ -533,9 +468,24 @@ CONTAINS
       END IF
 
       ! clean up
-      CALL cp_fm_release(evects)
-      CALL cp_fm_release(S_evects)
-      DEALLOCATE (evals, ostrength)
+      DO istate = 1, SIZE(evects, 2)
+         DO ispin = 1, nspins
+            IF (do_soc) THEN
+               CALL cp_fm_release(evects_sing(ispin, istate))
+               CALL cp_fm_release(evects_trip(ispin, istate))
+            ELSE
+               CALL cp_fm_release(evects(ispin, istate))
+            END IF
+            CALL cp_fm_release(S_evects(ispin, istate))
+         END DO
+      END DO
+      
+      IF (do_soc) THEN
+         DEALLOCATE (evects_sing, evects_trip, S_evects, evals, &
+                     ostrength_sing, ostrength_trip)
+      ELSE
+         DEALLOCATE (evects, S_evects, evals, ostrength)
+      END IF
 
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
          IF (do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
@@ -563,8 +513,9 @@ CONTAINS
       END DO
       DEALLOCATE (gs_mos)
 
-      IF (ASSOCIATED(matrix_ks_oep)) &
+      IF (ASSOCIATED(matrix_ks_oep)) THEN
          CALL dbcsr_deallocate_matrix_set(matrix_ks_oep)
+      END IF
 
       CALL timestop(handle)
 
@@ -922,4 +873,175 @@ CONTAINS
 
    END SUBROUTINE assign_state
 
+
+   SUBROUTINE tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+   tddfpt_control, logger, tddfpt_print_section, evects, evals, & 
+   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+   sub_env, ostrength, dipole_op_mos_occ, mult )
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = "tddfpt_energies" 
+
+      CHARACTER(len=20)                                  :: nstates_str
+      INTEGER                                            :: energy_unit, handle, ispin, istate, &
+                                                            iter, log_unit, mult, &
+                                                            niters, nspins, nstates, nstates_read
+      LOGICAL                                            :: explicit,is_restarted
+      REAL(kind=dp)                                      :: conv
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ, evects, S_evects
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_ks_oep, matrix_s
+      TYPE(kernel_env_type)                              :: kernel_env
+      TYPE(section_vals_type), POINTER                   :: namd_print_section, &
+                                                            tddfpt_print_section, tddfpt_section
+      TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                                         :: gs_mos
+      TYPE(tddfpt_subgroup_env_type)                     :: sub_env
+      TYPE(tddfpt_work_matrices)                         :: work_matrices
+
+      CALL timeset(routineN, handle)
+
+      IF (ALLOCATED(evals)) DEALLOCATE(evals)
+      IF (ALLOCATED(evects)) DEALLOCATE(evects)
+      IF (ALLOCATED(S_evects)) DEALLOCATE(S_evects)
+
+      ALLOCATE (evals(nstates))
+      ALLOCATE (evects(nspins, nstates), S_evects(nspins, nstates))
+      DO istate = 1, nstates
+         DO ispin = 1, nspins
+            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, S_evects(ispin, istate))
+         END DO
+      END DO
+
+      ! reuse Ritz vectors from the previous calculation if available
+      IF (tddfpt_control%is_restart) THEN
+         nstates_read = tddfpt_read_restart(evects=evects, evals=evals, gs_mos=gs_mos, &
+                                            logger=logger, tddfpt_section=tddfpt_section, &
+                                            tddfpt_print_section=tddfpt_print_section, &
+                                            fm_pool_ao_mo_occ=work_matrices%fm_pool_ao_mo_occ, &
+                                            blacs_env_global=blacs_env)
+      ELSE
+         nstates_read = 0
+      END IF
+
+      is_restarted = nstates_read >= nstates
+
+      ! build the list of missed singly excited states and sort them in ascending order
+      ! according to their excitation energies
+      log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "GUESS_VECTORS", extension=".tddfptLog")
+      CALL tddfpt_guess_vectors(evects=evects, evals=evals, gs_mos=gs_mos, log_unit=log_unit)
+      CALL cp_print_key_finished_output(log_unit, logger, tddfpt_print_section, "GUESS_VECTORS")
+
+      CALL tddfpt_orthogonalize_psi1_psi0(evects, work_matrices%S_C0_C0T)
+      CALL tddfpt_orthonormalize_psi1_psi1(evects, nstates, S_evects, matrix_s(1)%matrix)
+
+      niters = tddfpt_control%niters
+      IF (niters > 0) THEN
+         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "ITERATION_INFO", extension=".tddfptLog")
+         energy_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "DETAILED_ENERGY", extension=".tddfptLog")
+
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, "(1X,A)") "", &
+               "-------------------------------------------------------------------------------", &
+               "-                      TDDFPT WAVEFUNCTION OPTIMIZATION                       -", &
+               "-------------------------------------------------------------------------------"
+
+            WRITE (log_unit, '(/,T11,A,T27,A,T40,A,T62,A)') "Step", "Time", "Convergence", "Conv. states"
+            WRITE (log_unit, '(1X,79("-"))')
+         END IF
+
+         CALL cp_add_iter_level(logger%iter_info, "TDDFT_SCF")
+
+         DO
+            ! *** perform Davidson iterations ***
+            conv = tddfpt_davidson_solver(evects=evects, evals=evals, S_evects=S_evects, gs_mos=gs_mos, &
+                                          tddfpt_control=tddfpt_control, &
+                                          matrix_ks=matrix_ks, qs_env=qs_env, &
+                                          kernel_env=kernel_env, &
+                                          sub_env=sub_env, logger=logger, &
+                                          iter_unit=log_unit, energy_unit=energy_unit, &
+                                          tddfpt_print_section=tddfpt_print_section, &
+                                          work_matrices=work_matrices)
+
+            ! at this point at least one of the following conditions are met:
+            ! a) convergence criteria has been achieved;
+            ! b) maximum number of iterations has been reached;
+            ! c) Davidson iterations must be restarted due to lack of Krylov vectors or numerical instability
+
+            CALL cp_iterate(logger%iter_info, increment=0, iter_nr_out=iter)
+            ! terminate the loop if either (a) or (b) is true ...
+            IF ((conv <= tddfpt_control%conv .AND. is_restarted) .OR. iter >= niters) EXIT
+
+            ! ... otherwise restart Davidson iterations
+            is_restarted = .TRUE.
+            IF (log_unit > 0) THEN
+               WRITE (log_unit, '(1X,25("-"),1X,A,1X,25("-"))') "Restart Davidson iterations"
+               CALL m_flush(log_unit)
+            END IF
+         END DO
+
+         ! write TDDFPT restart file at the last iteration if requested to do so
+         CALL cp_iterate(logger%iter_info, increment=0, last=.TRUE.)
+         CALL tddfpt_write_restart(evects=evects, evals=evals, gs_mos=gs_mos, &
+                                   logger=logger, tddfpt_print_section=tddfpt_print_section)
+
+         CALL cp_rm_iter_level(logger%iter_info, "TDDFT_SCF")
+
+         ! print convergence summary
+         IF (log_unit > 0) THEN
+            CALL integer_to_string(iter, nstates_str)
+            IF (conv <= tddfpt_control%conv) THEN
+               WRITE (log_unit, "(1X,A)") "", &
+                  "-------------------------------------------------------------------------------", &
+                  "-  TDDFPT run converged in "//TRIM(nstates_str)//" iteration(s) ", &
+                  "-------------------------------------------------------------------------------"
+            ELSE
+               WRITE (log_unit, "(1X,A)") "", &
+                  "-------------------------------------------------------------------------------", &
+                  "-  TDDFPT run did NOT converge after "//TRIM(nstates_str)//" iteration(s) ", &
+                  "-------------------------------------------------------------------------------"
+            END IF
+         END IF
+
+         CALL cp_print_key_finished_output(energy_unit, logger, tddfpt_print_section, "DETAILED_ENERGY")
+         CALL cp_print_key_finished_output(log_unit, logger, tddfpt_print_section, "ITERATION_INFO")
+      ELSE
+         CALL cp_warn(__LOCATION__, "Skipping TDDFPT wavefunction optimization")
+      END IF
+
+      IF (ASSOCIATED(matrix_ks_oep) .AND. tddfpt_control%dipole_form == tddfpt_dipole_velocity) THEN
+         CALL cp_warn(__LOCATION__, &
+                      "Transition dipole moments and oscillator strengths are likely to be incorrect "// &
+                      "when computed using an orbital energy correction XC-potential together with "// &
+                      "the velocity form of dipole transition integrals")
+      END IF
+
+      ! *** print summary information ***
+      log_unit = cp_logger_get_default_io_unit()
+
+      namd_print_section => section_vals_get_subs_vals(tddfpt_print_section, "NAMD_PRINT")
+      CALL section_vals_get(namd_print_section, explicit=explicit)
+      IF (explicit) THEN
+         CALL tddfpt_write_newtonx_output(evects, evals, gs_mos, logger, tddfpt_print_section, &
+                                          matrix_s(1)%matrix, S_evects, sub_env) !qs_env, sub_env)
+      END IF
+      IF (ALLOCATED(ostrength)) DEALLOCATE(ostrength)
+      ALLOCATE (ostrength(nstates))
+      ostrength = 0.0_dp
+      CALL tddfpt_print_summary(log_unit, evects, evals, ostrength, mult, &
+                                dipole_op_mos_occ, tddfpt_control%dipole_form)
+      CALL tddfpt_print_excitation_analysis(log_unit, evects, evals, gs_mos, matrix_s(1)%matrix, &
+                                            min_amplitude=tddfpt_control%min_excitation_amplitude)
+      CALL tddfpt_print_nto_analysis(qs_env, evects, evals, gs_mos, matrix_s(1)%matrix, &
+                                     tddfpt_print_section)
+
+      IF (tddfpt_control%do_lrigpw) THEN
+         CALL lri_print_stat(qs_env, ltddfpt=.TRUE., tddfpt_lri_env=kernel_env%full_kernel%lri_env)
+      END IF
+
+      CALL timestop(handle)
+   END SUBROUTINE tddfpt_energies
 END MODULE qs_tddfpt2_methods

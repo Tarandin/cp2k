@@ -512,6 +512,12 @@ MODULE cp_control_types
       !> user-defined reference point
       REAL(kind=dp), DIMENSION(:), POINTER :: dipole_ref_point
       !
+      ! SOC subsection
+      ! Number of Singlett states to be used
+      INTEGER                              :: soc_singlett
+      ! Number of triplett states to be used
+      INTEGER                              :: soc_triplett
+      !
       ! MGRID subsection
       !
       !> number of plain-wave grids

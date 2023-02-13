@@ -1383,7 +1383,7 @@ CONTAINS
                           "Density Functional Perturbation Theory. "// &
                           "Current implementation works for hybrid functionals. "// &
                           "Can be used with Gaussian and Plane Waves (GPW) method only.", &
-                          n_keywords=12, n_subsections=4, repeats=.FALSE., &
+                          n_keywords=12, n_subsections=7, repeats=.FALSE., &
                           citations=(/Iannuzzi2005/))
 
       NULLIFY (keyword, print_key, subsection)
@@ -1597,6 +1597,31 @@ CONTAINS
                           description="User-defined reference point.", &
                           usage="REFERENCE_POINT x y z", &
                           repeats=.FALSE., n_var=3, type_of_var=real_t, unit_str='bohr')
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      ! SOC functional
+
+      CALL section_create(subsection, __LOCATION__, name="SOC", &
+                          description="Is jet to be implemented", &
+                          n_keywords=2, n_subsections=0, repeats=.FALSE.)
+
+      CALL keyword_create(keyword, __LOCATION__, name="SINGLETT", &
+         description="Number of singlett states", &
+         repeats=.FALSE., n_var=1, & 
+         type_of_var=integer_t, &
+         default_i_val=-1)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="TRIPLETT", &
+         description="Number of triplett states", &
+         repeats=.FALSE., n_var=1, &
+         type_of_var=integer_t, &
+         default_i_val=-1)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
