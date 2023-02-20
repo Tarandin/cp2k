@@ -1788,6 +1788,14 @@ CONTAINS
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
 
+
+      CALL cp_print_key_section_create(print_key, __LOCATION__, name = "SOC_PRINT", &
+                      description="Controls the printout of the tddfpt2_soc modul", &
+                      print_level = debug_print_level + 1, filename="SOC")
+      CALL section_add_subsection(subsection, print_key)
+      CALL section_release(print_key)
+
+
       CALL cp_print_key_section_create(print_key, __LOCATION__, name="FORCES", &
                                        description="Controls the calculation and printing of excited state forces."// &
                                        "Prints difference in forces between excited state and ground state!", &

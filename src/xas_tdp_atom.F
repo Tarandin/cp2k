@@ -127,6 +127,8 @@ MODULE xas_tdp_atom
                                               xc_rho_set_release,&
                                               xc_rho_set_type
 
+   USE qs_tddfpt2_soc_types,            ONLY: soc_atom_env_type
+
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num
 #include "./base/base_uses.f90"
 
@@ -136,7 +138,7 @@ MODULE xas_tdp_atom
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'xas_tdp_atom'
 
-   PUBLIC :: init_xas_atom_env, integrate_fxc_atoms, integrate_soc_atoms
+   PUBLIC :: init_xas_atom_env, integrate_fxc_atoms, integrate_soc_atoms, compute_sphi_so
 
 CONTAINS
 
@@ -3343,10 +3345,11 @@ CONTAINS
 !> \note We compute: <da_dx|V\(4c^2-2V)|db_dy> - <da_dy|V\(4c^2-2V)|db_dx>, where V is a model
 !>       potential on the atomic grid. What we get is purely imaginary
 ! **************************************************************************************************
-   SUBROUTINE integrate_soc_atoms(matrix_soc, xas_atom_env, qs_env)
+   SUBROUTINE integrate_soc_atoms(matrix_soc, qs_env, xas_atom_env, soc_atom_env)
 
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_soc
-      TYPE(xas_atom_env_type), POINTER                   :: xas_atom_env
+      TYPE(xas_atom_env_type), POINTER, OPTIONAL         :: xas_atom_env
+      TYPE(soc_atom_env_type), POINTER, OPTIONAL         :: soc_atom_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'integrate_soc_atoms'
@@ -3407,7 +3410,11 @@ CONTAINS
          CALL get_gto_basis_set(basis, nsgf=nsgf)
          ALLOCATE (int_soc(ikind)%array(nsgf, nsgf, 3))
          intsgf => int_soc(ikind)%array
-         sphi_so => xas_atom_env%orb_sphi_so(ikind)%array
+         IF (PRESENT(xas_atom_env)) THEN
+            sphi_so => xas_atom_env%orb_sphi_so(ikind)%array
+         ELSE
+            sphi_so => soc_atom_env%orb_sphi_so(ikind)%array
+         END IF
          intsgf = 0.0_dp
 
          DO i = 1, 3

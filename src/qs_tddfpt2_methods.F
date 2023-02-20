@@ -340,38 +340,38 @@ CONTAINS
        soc_section => section_vals_get_subs_vals(tddfpt_section, "SOC")
        CALL section_vals_get(soc_section, explicit=do_soc)
       
-      IF (do_soc) then
-         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
-         IF (log_unit > 0) THEN
-            WRITE (log_unit, "(1X,A)") "", &
-               "-------------------------------------------------------------------------------", &
-               "-                      TDDFPT SINGLET ENERGIES                       -", &
-               "-------------------------------------------------------------------------------"
-         END IF
-
-         tddfpt_control%rks_triplets = .FALSE.
-         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
-   tddfpt_control, logger, tddfpt_print_section, evects_sing, evals, &
-   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
-   sub_env, ostrength_sing, dipole_op_mos_occ, 1)
-   log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
-      IF (log_unit > 0) THEN
-            WRITE (log_unit, "(1X,A)") "", &
-               "-------------------------------------------------------------------------------", &
-               "-                      TDDFPT TRIPLET ENERGIES                       -", &
-               "-------------------------------------------------------------------------------"
-         END IF
-         tddfpt_control%rks_triplets = .TRUE.
-         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
-   tddfpt_control, logger, tddfpt_print_section, evects_trip, evals, &
-   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
-   sub_env, ostrength_trip, dipole_op_mos_occ, 3)
-      ELSE
+!      IF (do_soc) then
+!         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
+!         IF (log_unit > 0) THEN
+!            WRITE (log_unit, "(1X,A)") "", &
+!               "-------------------------------------------------------------------------------", &
+!               "-                      TDDFPT SINGLET ENERGIES                       -", &
+!               "-------------------------------------------------------------------------------"
+!         END IF
+!
+!         tddfpt_control%rks_triplets = .FALSE.
+!         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+!   tddfpt_control, logger, tddfpt_print_section, evects_sing, evals, &
+!   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+!   sub_env, ostrength_sing, dipole_op_mos_occ, 1)
+!   log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
+!      IF (log_unit > 0) THEN
+!            WRITE (log_unit, "(1X,A)") "", &
+!               "-------------------------------------------------------------------------------", &
+!               "-                      TDDFPT TRIPLET ENERGIES                       -", &
+!               "-------------------------------------------------------------------------------"
+!         END IF
+!         tddfpt_control%rks_triplets = .TRUE.
+!         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+!   tddfpt_control, logger, tddfpt_print_section, evects_trip, evals, &
+!   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+!   sub_env, ostrength_trip, dipole_op_mos_occ, 3)
+!      ELSE
       CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
    tddfpt_control, logger, tddfpt_print_section, evects, evals, &
    gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
    sub_env, ostrength, dipole_op_mos_occ, mult)
-      END IF
+!      END IF
 
       !print forces for selected states
       IF (calc_forces) THEN
