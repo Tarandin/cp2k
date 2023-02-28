@@ -27,6 +27,7 @@ MODULE header
    PUBLIC :: qmmm_header, atom_header, atom_footer, band_header, xtb_header
    PUBLIC :: tmc_header, tmc_ana_header
    PUBLIC :: sirius_header
+   PUBLIC :: tddfpt_soc_header
 
 CONTAINS
 
@@ -133,6 +134,25 @@ CONTAINS
          "*******************************************************************************"
 
    END SUBROUTINE tddfpt_header
+
+   SUBROUTINE tddfpt_soc_header(iw)
+      INTEGER, INTENT(in)                                :: iw
+
+      IF (iw < 0) RETURN
+      WRITE (iw, '((T2,A79))') &
+         !"*******************************************************************************", &
+         "**                                                                           **", &
+         "**                            ####### ####### #######                        **", &
+         "**                        #   ##      ##   ## ##                             **", &
+         "**                       ###  ######  ##   ## ##                             **", &
+         "**                        #       ##  ##   ## ##                             **", &
+         "**                            ######  ####### #######                        **", &
+         "**                 Based on the xas module from Augustin Bussy               **", &
+         "*******************************************************************************"
+
+
+
+   END SUBROUTINE tddfpt_soc_header
 
 ! **************************************************************************************************
 !> \brief ...

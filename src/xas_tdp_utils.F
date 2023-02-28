@@ -43,7 +43,8 @@ MODULE xas_tdp_utils
                                               cp_fm_release,&
                                               cp_fm_set_element,&
                                               cp_fm_to_fm_submat,&
-                                              cp_fm_type
+                                              cp_fm_type,&
+                                              cp_fm_write_formatted
    USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
    USE dbcsr_api,                       ONLY: &
         dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, &
@@ -86,7 +87,7 @@ MODULE xas_tdp_utils
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'xas_tdp_utils'
 
-   PUBLIC :: setup_xas_tdp_prob, solve_xas_tdp_prob, include_rcs_soc, include_os_soc
+   PUBLIC :: setup_xas_tdp_prob, solve_xas_tdp_prob, include_rcs_soc,include_os_soc, rcs_amew_soc_elements 
 
    !A helper type for SOC
    TYPE dbcsr_soc_package_type
@@ -2000,6 +2001,14 @@ CONTAINS
       nex = nsg
       eps_filter = xas_tdp_control%eps_filter
 
+ !     !! DEBUG!!
+ !     output_unit = cp_logger_get_default_io_unit()
+ !     IF (output_unit > 0) THEN
+ !        CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
+ !        CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
+ !        CALL cp_fm_write_formatted(tp_coeffs, output_unit, "DEBUG TP")
+ !     END IF
+
 !  Creating the real part and imaginary part of the final SOC fm
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL cp_fm_struct_create(full_struct, context=blacs_env, para_env=para_env, &
@@ -2299,6 +2308,13 @@ CONTAINS
       ALLOCATE (donor_state%soc_evals(ntot - 1))
       donor_state%soc_evals(:) = tmp_evals(2:ntot) - tmp_evals(1)
 
+      !! DEBUG::
+      output_unit = cp_logger_get_default_io_unit()
+      IF (output_unit > 0) THEN
+         DO itp = 1,SIZE(donor_state%soc_evals)
+            write(output_unit, '(I3,5x,F10.6)')  itp, donor_state%soc_evals(itp)
+         END DO
+      END IF
 !  Compute the dipole oscillator strengths
       CALL compute_soc_dipole_fosc(evecs_cfm, dbcsr_soc_package, donor_state, xas_tdp_env, &
                                    xas_tdp_control, qs_env)

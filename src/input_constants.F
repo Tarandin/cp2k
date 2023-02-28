@@ -695,6 +695,10 @@ MODULE input_constants
                                                tddfpt_dipole_length = 2, &
                                                tddfpt_dipole_velocity = 3
 
+   ! Form of dipol operator for TDDFPT SOC oscillator strength calculation
+   INTEGER, PARAMETER, PUBLIC               :: tddfpt_soc_dipol_len = 1,&
+                                               tddfpt_soc_dipol_vel = 2
+
    ! XC Kernel derivative methods for forces
    INTEGER, PARAMETER, PUBLIC               :: xc_kernel_method_best = 100, &
                                                xc_kernel_method_analytic = 101, &
