@@ -36,9 +36,11 @@ MODULE qs_tddfpt2_methods
    USE dbcsr_api,                       ONLY: dbcsr_copy,&
                                               dbcsr_create,&
                                               dbcsr_p_type,&
-                                              dbcsr_set
+                                              dbcsr_set,&
+                                              dbcsr_print
    USE exstates_types,                  ONLY: excited_energy_type
-   USE header,                          ONLY: tddfpt_header
+   USE header,                          ONLY: tddfpt_header,&
+                                              tddfpt_soc_header
    USE hfx_types,                       ONLY: compare_hfx_sections
    USE input_constants,                 ONLY: tddfpt_dipole_velocity,&
                                               tddfpt_kernel_full,&
@@ -100,6 +102,18 @@ MODULE qs_tddfpt2_methods
                                               tddfpt_release_ground_state_mos
    USE string_utilities,                ONLY: integer_to_string
    USE xc_write_output,                 ONLY: xc_write
+
+   !!Under construction!!
+   USE qs_tddfpt2_soc,                  ONLY: tddfpt_soc, &
+                                              inititialize_soc
+   USE qs_tddfpt2_soc_types,            ONLY: soc_atom_env_type, &
+                                              soc_atom_create, &
+                                              soc_atom_release, &
+                                              soc_env_type, &
+                                              soc_env_create, &
+                                              soc_env_release
+   USE xas_tdp_atom,                    ONLY: integrate_soc_atoms, compute_sphi_so
+   !! END UNDER CONSTUCTION
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -141,16 +155,22 @@ CONTAINS
                                                             old_state
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
-                                                            state_change, do_soc
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
+                                                            state_change,do_soc,&
+                                                            mult_tmp
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, &
+                                                            evals_sing, & 
+                                                            evals_trip, &
+                                                            ostrength
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: ostrength_sing, ostrength_trip
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: my_mos
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ, evects, S_evects
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: evects_sing,evects_trip
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ, S_evects
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: evects, &
+                                                            evects_sing, &
+                                                            evects_trip
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_ks_oep, matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -331,38 +351,45 @@ CONTAINS
        soc_section => section_vals_get_subs_vals(tddfpt_section, "SOC")
        CALL section_vals_get(soc_section, explicit=do_soc)
       
-!      IF (do_soc) then
-!         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
-!         IF (log_unit > 0) THEN
-!            WRITE (log_unit, "(1X,A)") "", &
-!               "-------------------------------------------------------------------------------", &
-!               "-                      TDDFPT SINGLET ENERGIES                       -", &
-!               "-------------------------------------------------------------------------------"
-!         END IF
-!
-!         tddfpt_control%rks_triplets = .FALSE.
-!         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
-!   tddfpt_control, logger, tddfpt_print_section, evects_sing, evals, &
-!   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
-!   sub_env, ostrength_sing, dipole_op_mos_occ, 1)
-!   log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
-!      IF (log_unit > 0) THEN
-!            WRITE (log_unit, "(1X,A)") "", &
-!               "-------------------------------------------------------------------------------", &
-!               "-                      TDDFPT TRIPLET ENERGIES                       -", &
-!               "-------------------------------------------------------------------------------"
-!         END IF
-!         tddfpt_control%rks_triplets = .TRUE.
-!         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
-!   tddfpt_control, logger, tddfpt_print_section, evects_trip, evals, &
-!   gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
-!   sub_env, ostrength_trip, dipole_op_mos_occ, 3)
-!      ELSE
-      CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
-   tddfpt_control, logger, tddfpt_print_section, evects, evals, &
+      IF (do_soc) then
+         log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
+         CALL tddfpt_soc_header(log_unit)
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, "(1X,A)") "", &
+               "-------------------------------------------------------------------------------", &
+               "-------------------------------------------------------------------------------", &
+               "-                      TDDFPT SINGLET ENERGIES                                -"
+         END IF
+
+         mult_tmp = tddfpt_control%rks_triplets
+         tddfpt_control%rks_triplets = .FALSE.
+         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+   tddfpt_control, logger, tddfpt_print_section, evects_sing,evals_sing, &
    gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
-   sub_env, ostrength, dipole_op_mos_occ, mult)
-!      END IF
+   sub_env, ostrength_sing, dipole_op_mos_occ, 1)
+   log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, "PROGRAM_BANNER", extension=".tddfptLog")
+      IF (log_unit > 0) THEN
+            WRITE (log_unit, "(1X,A)") "", &
+               "-------------------------------------------------------------------------------", &
+               "-------------------------------------------------------------------------------", &
+               "-                      TDDFPT TRIPLET ENERGIES                                -"
+         END IF
+         tddfpt_control%rks_triplets = .TRUE.
+         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+         tddfpt_control, logger, tddfpt_print_section, evects_trip, evals_trip, &
+         gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+         sub_env, ostrength_trip, dipole_op_mos_occ, 3)
+
+         CALL tddfpt_soc(qs_env, tddfpt_print_section, evals_sing, &
+                         evals_trip, evects_sing, evects_trip)
+
+        tddfpt_control%rks_triplets = mult_tmp
+      ELSE
+        CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
+         tddfpt_control, logger, tddfpt_print_section, evects,evals, &
+         gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
+         sub_env, ostrength, dipole_op_mos_occ, mult)
+      END IF
 
       !print forces for selected states
       IF (calc_forces) THEN
@@ -371,11 +398,11 @@ CONTAINS
                                   gs_mos, kernel_env, sub_env, work_matrices)
          ELSE
             IF (mult == 1) THEN
-               CALL tddfpt_print_forces(qs_env, evects_sing, evals,  &
+               CALL tddfpt_print_forces(qs_env, evects_sing, evals_sing,  &
                                   ostrength_sing, tddfpt_print_section, &
                                   gs_mos, kernel_env, sub_env, work_matrices)
             ELSE
-               CALL tddfpt_print_forces(qs_env, evects_trip, evals,  &
+               CALL tddfpt_print_forces(qs_env, evects_trip, evals_trip,  &
                                   ostrength_trip, tddfpt_print_section, &
                                   gs_mos, kernel_env, sub_env, work_matrices)
             END IF
@@ -401,7 +428,7 @@ CONTAINS
                CALL assign_state(qs_env, matrix_s, evects, mos, ex_env%fingerprint, my_state)
             ELSE
                IF (mult == 1) THEN
-                  CALL assign_state(qs_env, matrix_s, evects_sing, mos, ex_env%fingerprint, my_state)
+                  CALL assign_state(qs_env, matrix_s, evects_trip, mos, ex_env%fingerprint, my_state)
                ELSE
                   CALL assign_state(qs_env, matrix_s, evects_trip, mos, ex_env%fingerprint, my_state)
                END IF
@@ -422,7 +449,15 @@ CONTAINS
          END IF
          !
          ! energy
-         ex_env%evalue = evals(my_state)
+         IF (do_soc) THEN 
+            IF (mult == 1) THEN
+               ex_env%evalue = evals_sing(my_state)
+            ELSE IF (mult == 3) THEN
+               ex_env%evalue = evals_trip(my_state)
+            END IF
+         ELSE
+            ex_env%evalue = evals(my_state)
+         END IF
          ! excitation vector
          IF (ASSOCIATED(ex_env%evect)) THEN
             DO ispin = 1, SIZE(ex_env%evect)
@@ -438,9 +473,9 @@ CONTAINS
                   CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
                   CALL cp_fm_to_fm(evects_sing(ispin, my_state), ex_env%evect(ispin))
                ELSE
-                  CALL cp_fm_get_info(matrix=evects_sing(ispin, 1), matrix_struct=matrix_struct)
+                  CALL cp_fm_get_info(matrix=evects_trip(ispin, 1), matrix_struct=matrix_struct)
                   CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
-                  CALL cp_fm_to_fm(evects_sing(ispin, my_state), ex_env%evect(ispin))
+                  CALL cp_fm_to_fm(evects_trip(ispin, my_state), ex_env%evect(ispin))
                END IF
             ELSE
                CALL cp_fm_get_info(matrix=evects(ispin, 1), matrix_struct=matrix_struct)
@@ -472,13 +507,13 @@ CONTAINS
             ELSE
                CALL cp_fm_release(evects(ispin, istate))
             END IF
-            CALL cp_fm_release(S_evects(ispin, istate))
+               CALL cp_fm_release(S_evects(ispin, istate))
          END DO
       END DO
       
       IF (do_soc) THEN
-         DEALLOCATE (evects_sing, evects_trip, S_evects, evals, &
-                     ostrength_sing, ostrength_trip)
+         DEALLOCATE (evects_sing, S_evects, evals_sing, ostrength_sing)
+         DEALLOCATE (evects_trip, evals_trip, ostrength_trip)
       ELSE
          DEALLOCATE (evects, S_evects, evals, ostrength)
       END IF

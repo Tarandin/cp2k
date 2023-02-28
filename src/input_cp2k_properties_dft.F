@@ -38,7 +38,8 @@ MODULE input_cp2k_properties_dft
         ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, scan_x, scan_xy, &
         scan_xyz, scan_xz, scan_y, scan_yz, scan_z, tddfpt_dipole_berry, tddfpt_dipole_length, &
         tddfpt_dipole_velocity, tddfpt_kernel_full, tddfpt_kernel_none, tddfpt_kernel_stda, &
-        use_mom_ref_coac, use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero
+        use_mom_ref_coac, use_mom_ref_com, use_mom_ref_user,use_mom_ref_zero,& 
+        tddfpt_soc_dipol_len, tddfpt_soc_dipol_vel
    USE input_cp2k_atprop,               ONLY: create_atprop_section
    USE input_cp2k_dft,                  ONLY: create_ddapc_restraint_section,&
                                               create_interp_section,&
@@ -1478,6 +1479,28 @@ CONTAINS
          repeats=.FALSE., n_var=1, & 
          type_of_var=integer_t, &
          default_i_val=-1)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="EPS_FILTER", &
+                          variants=s2a("EPS_FILTER_MATRIX"), &
+                          description="The threshold used for sparse matrix operations", &
+                          usage="EPS_FILTER {real}", &
+                          type_of_var=real_t, &
+                          default_r_val=1.0E-10_dp)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="DIPOLE_FORM", &
+                          variants=(/"DIP_FORM"/), &
+                          description="Type of integral to get the oscillator strengths "// &
+                          "in the dipole approximation", &
+                          usage="DIPOLE_FORM {string}", &
+                          default_i_val=tddfpt_soc_dipol_vel, &
+                          enum_c_vals=s2a("LENGTH", "VELOCITY"), &
+                          enum_desc=s2a("Length form &lang; 0 | e r | n &rang;", &
+                                        "Velocity form &lang; 0 | d/dr | n &rang;"), &
+                          enum_i_vals=(/tddfpt_soc_dipol_len, tddfpt_soc_dipol_vel/))
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
