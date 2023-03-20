@@ -138,7 +138,12 @@ MODULE xas_tdp_atom
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'xas_tdp_atom'
 
-   PUBLIC :: init_xas_atom_env, integrate_fxc_atoms, integrate_soc_atoms, compute_sphi_so
+   PUBLIC :: init_xas_atom_env, &
+             integrate_fxc_atoms, &
+             integrate_soc_atoms, &
+             calculate_density_coeffs,&
+             compute_sphi_so, &
+             truncate_radial_grid
 
 CONTAINS
 
@@ -208,7 +213,9 @@ CONTAINS
       END DO !ikind
 
 !  Compute the coefficients to expand the density in the RI_XAS basis, if requested
-      IF (do_xc .AND. (.NOT. xas_tdp_control%xps_only)) CALL calculate_density_coeffs(xas_atom_env, qs_env)
+      IF (do_xc .AND. (.NOT. xas_tdp_control%xps_only)) THEN
+         CALL calculate_density_coeffs(xas_atom_env=xas_atom_env,qs_env=qs_env)
+      END IF
 
       CALL timestop(handle)
 
@@ -846,9 +853,10 @@ CONTAINS
 !>       and its neighbors at a time. Leads to smaller overlap matrix to invert and less 3-center
 !>       overlap to compute. The procedure is repeated for each excited atom
 ! **************************************************************************************************
-   SUBROUTINE calculate_density_coeffs(xas_atom_env, qs_env)
+   SUBROUTINE calculate_density_coeffs(xas_atom_env, soc_atom_env, qs_env)
 
-      TYPE(xas_atom_env_type), POINTER                   :: xas_atom_env
+      TYPE(xas_atom_env_type), POINTER, OPTIONAL         :: xas_atom_env
+      TYPE(soc_atom_env_type),  POINTER, OPTIONAL        :: soc_atom_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'calculate_density_coeffs'
@@ -901,8 +909,13 @@ CONTAINS
       CALL get_qs_env(qs_env, nkind=nkind, qs_kind_set=qs_kind_set, rho=rho, &
                       natom=natom, particle_set=particle_set, dbcsr_dist=dbcsr_dist, &
                       para_env=para_env, blacs_env=blacs_env)
-      nspins = xas_atom_env%nspins
-      nex = SIZE(xas_atom_env%excited_atoms)
+      IF(PRESENT(xas_atom_env)) THEN
+         nspins = xas_atom_env%nspins
+         nex = SIZE(xas_atom_env%excited_atoms)
+      ELSE
+         nspins = soc_atom_env%nspins
+         nex = SIZE(soc_atom_env%excited_atoms)
+      END IF
       CALL qs_rho_get(rho, rho_ao=rho_ao)
 
 !  Create the needed neighbor list and basis set lists.
@@ -911,6 +924,9 @@ CONTAINS
       CALL basis_set_list_setup(basis_set_ri, "RI_XAS", qs_kind_set)
       CALL basis_set_list_setup(basis_set_orb, "ORB", qs_kind_set)
 
+      IF (.NOT. ASSOCIATED(basis_set_orb)) CPABORT('ORB Basis is not present')
+      IF (.NOT. ASSOCIATED(basis_set_ri)) CPABORT('RI Basis is not present')
+
 !  Compute the RI overlap matrix on the whole system
       CALL build_xas_tdp_ovlp_nl(sab_ri, basis_set_ri, basis_set_ri, qs_env)
       CALL build_overlap_matrix_simple(qs_env%ks_env, overlap, basis_set_ri, basis_set_ri, sab_ri)
@@ -918,8 +934,13 @@ CONTAINS
       CALL release_neighbor_list_sets(sab_ri)
 
 !  Get the neighbors of the excited atoms (= all the atoms where density coeffs are needed)
-      CALL find_neighbors(xas_atom_env%excited_atoms, ri_mats, xas_atom_env%ri_radius, &
-                          qs_env, all_neighbors=all_ri_atoms, neighbor_set=xas_atom_env%exat_neighbors)
+      IF(PRESENT(xas_atom_env)) THEN
+         CALL find_neighbors(xas_atom_env%excited_atoms, ri_mats, xas_atom_env%ri_radius, &
+                             qs_env, all_neighbors=all_ri_atoms, neighbor_set=xas_atom_env%exat_neighbors)
+      ELSE
+         CALL find_neighbors(soc_atom_env%excited_atoms, ri_mats, soc_atom_env%ri_radius, &
+                             qs_env, all_neighbors=all_ri_atoms,neighbor_set=soc_atom_env%exat_neighbors)
+      END IF
 
       !keep in mind that double occupation is included in rho_ao in case of closed-shell
       factor = 0.5_dp; IF (nspins == 2) factor = 1.0_dp
@@ -929,18 +950,33 @@ CONTAINS
 !        => need different sets of RI coeffs
       ALLOCATE (blk_size_ri(natom))
       CALL get_particle_set(particle_set, qs_kind_set, nsgf=blk_size_ri, basis=basis_set_ri)
-      ALLOCATE (xas_atom_env%ri_dcoeff(natom, nspins, nex))
-      DO iex = 1, nex
-         DO ispin = 1, nspins
-            DO iat = 1, natom
-               NULLIFY (xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
-               IF ((.NOT. ANY(xas_atom_env%exat_neighbors(iex)%array == iat)) &
-                   .AND. (.NOT. xas_atom_env%excited_atoms(iex) == iat)) CYCLE
-               ALLOCATE (xas_atom_env%ri_dcoeff(iat, ispin, iex)%array(blk_size_ri(iat)))
-               xas_atom_env%ri_dcoeff(iat, ispin, iex)%array = 0.0_dp
-            END DO
-         END DO
-      END DO
+      IF(PRESENT(xas_atom_env)) THEN
+        ALLOCATE (xas_atom_env%ri_dcoeff(natom, nspins, nex))
+        DO iex = 1, nex
+            DO ispin = 1, nspins
+               DO iat = 1, natom
+                  NULLIFY (xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
+                  IF ((.NOT. ANY(xas_atom_env%exat_neighbors(iex)%array == iat)) &
+                      .AND. (.NOT. xas_atom_env%excited_atoms(iex) == iat)) CYCLE
+                 ALLOCATE (xas_atom_env%ri_dcoeff(iat, ispin, iex)%array(blk_size_ri(iat)))
+                  xas_atom_env%ri_dcoeff(iat, ispin, iex)%array = 0.0_dp
+              END DO
+           END DO
+        END DO
+      ELSE
+         ALLOCATE (soc_atom_env%ri_dcoeff(natom, nspins, nex))
+        DO iex = 1, nex
+            DO ispin = 1, nspins
+               DO iat = 1, natom
+                  NULLIFY (soc_atom_env%ri_dcoeff(iat, ispin, iex)%array)
+                  IF ((.NOT. ANY(soc_atom_env%exat_neighbors(iex)%array == iat)) &
+                      .AND. (.NOT. soc_atom_env%excited_atoms(iex) == iat)) CYCLE
+                  ALLOCATE (soc_atom_env%ri_dcoeff(iat, ispin, iex)%array(blk_size_ri(iat)))
+                  soc_atom_env%ri_dcoeff(iat, ispin, iex)%array = 0.0_dp
+              END DO
+           END DO
+        END DO
+      END IF
 
       output_unit = cp_logger_get_default_io_unit()
       IF (output_unit > 0) THEN
@@ -958,11 +994,19 @@ CONTAINS
       DO iex = 1, nex
 
          !get neighbors of current atom
-         exat = xas_atom_env%excited_atoms(iex)
-         nnb = 1 + SIZE(xas_atom_env%exat_neighbors(iex)%array)
-         ALLOCATE (neighbors(nnb))
-         neighbors(1) = exat
-         neighbors(2:nnb) = xas_atom_env%exat_neighbors(iex)%array(:)
+         IF (PRESENT(xas_atom_env)) THEN
+           exat = xas_atom_env%excited_atoms(iex)
+           nnb = 1 + SIZE(xas_atom_env%exat_neighbors(iex)%array)
+           ALLOCATE (neighbors(nnb))
+           neighbors(1) = exat
+           neighbors(2:nnb) = xas_atom_env%exat_neighbors(iex)%array(:)
+         ELSE
+           exat = soc_atom_env%excited_atoms(iex)
+           nnb = 1 + SIZE(soc_atom_env%exat_neighbors(iex)%array)
+           ALLOCATE (neighbors(nnb))
+           neighbors(1) = exat
+           neighbors(2:nnb) = soc_atom_env%exat_neighbors(iex)%array(:)
+         END IF
          CALL sort_unique(neighbors, unique)
 
          !link the atoms to their position in neighbors
@@ -979,9 +1023,12 @@ CONTAINS
 
          !Get the neighbor lists for the overlap integrals (abc), centers c on the current
          !excited atom and its neighbors defined by RI_RADIUS
-         CALL build_xas_tdp_ovlp_nl(ab_list, basis_set_orb, basis_set_orb, qs_env)
+         CALL build_xas_tdp_ovlp_nl(ab_list, basis_set_ri, basis_set_ri, qs_env)
          CALL build_xas_tdp_3c_nl(ac_list, basis_set_orb, basis_set_ri, do_potential_id, &
                                   qs_env, excited_atoms=neighbors)
+
+         IF (ASSOCIATED(ab_list)) CPABORT("ab_list is not associated")
+         IF (ASSOCIATED(ac_list)) CPABORT("ac_list is not associated")
 
          !Compute the 3-center overlap integrals
          pot%potential_type = do_potential_id
@@ -998,7 +1045,8 @@ CONTAINS
          !Do the actual contraction: coeff_y = sum_pq sum_x P_pq (phi_p phi_q xi_x) S_xy^-1
 
 !$OMP PARALLEL DEFAULT(NONE) &
-!$OMP SHARED(pqX,rho_ao,ri_sinv,xas_atom_env,blk_size_ri,idx_to_nb,nspins,nnb,neighbors,iex,factor) &
+!$OMP SHARED(pqX,rho_ao,ri_sinv,xas_atom_env, soc_atom_env)&
+!$OMP SHARED(blk_size_ri,idx_to_nb,nspins,nnb,neighbors,iex,factor) &
 !$OMP PRIVATE(iter,ind,t_block,tensor_found,iatom,jatom,katom,inb,prefac,ispin) &
 !$OMP PRIVATE(pmat_block,pmat_found,pmat_blockt,pmat_foundt,work1,work2,jnb,ri_at) &
 !$OMP PRIVATE(sinv_block,sinv_found,sinv_blockt,sinv_foundt)
@@ -1048,7 +1096,12 @@ CONTAINS
                   IF ((.NOT. sinv_found) .AND. (.NOT. sinv_foundt)) CYCLE
 
                   !second contraction with the inverse RI overlap
-                  ALLOCATE (work2(SIZE(xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array)))
+                  IF(PRESENT(xas_atom_env)) THEN
+                     ALLOCATE (work2(SIZE(xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array)))
+                  ELSE
+                     ALLOCATE (work2(SIZE(soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array)))
+                  END IF
+
                   work2 = 0.0_dp
 
                   IF (sinv_found) THEN
@@ -1061,9 +1114,15 @@ CONTAINS
                      END DO
                   END IF
                   DO i = 1, SIZE(work2)
+                     IF(PRESENT(xas_atom_env)) THEN
 !$OMP ATOMIC
-                     xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) = &
+                        xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) = &
                         xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) + work2(i)
+                     ELSE
+!$OMP ATOMIC
+                        soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) = &
+                        soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) + work2(i)
+                     END IF
                   END DO
 
                   DEALLOCATE (work2)
@@ -1087,15 +1146,27 @@ CONTAINS
       END DO !iex
 
       !making sure all procs have the same info
-      DO iex = 1, nex
-         DO ispin = 1, nspins
-            DO iat = 1, natom
-               IF ((.NOT. ANY(xas_atom_env%exat_neighbors(iex)%array == iat)) &
-                   .AND. (.NOT. xas_atom_env%excited_atoms(iex) == iat)) CYCLE
-               CALL para_env%sum(xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
-            END DO !iat
-         END DO !ispin
-      END DO !iex
+      IF(PRESENT(xas_atom_env)) THEN
+         DO iex = 1, nex
+            DO ispin = 1, nspins
+               DO iat = 1, natom
+                  IF ((.NOT. ANY(xas_atom_env%exat_neighbors(iex)%array == iat)) &
+                      .AND. (.NOT. xas_atom_env%excited_atoms(iex) == iat)) CYCLE
+                  CALL para_env%group%sum(xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
+               END DO !iat
+            END DO !ispin
+         END DO !iex
+      ELSE
+         DO iex = 1, nex
+            DO ispin = 1, nspins
+               DO iat = 1, natom
+                  IF ((.NOT. ANY(soc_atom_env%exat_neighbors(iex)%array == iat)) &
+                      .AND. (.NOT. soc_atom_env%excited_atoms(iex) == iat)) CYCLE
+                  CALL para_env%group%sum(soc_atom_env%ri_dcoeff(iat, ispin, iex)%array)
+               END DO !iat
+            END DO !ispin
+         END DO !iex
+      END IF
 
 !  clean-up
       CALL dbcsr_deallocate_matrix_set(overlap)
@@ -3382,7 +3453,6 @@ CONTAINS
 
 !  Loop over the kinds to compute the integrals
       DO ikind = 1, nkind
-
          CALL get_qs_kind(qs_kind_set(ikind), basis_set=basis, basis_type="ORB", zeff=zeff, grid_atom=grid)
          CALL get_gto_basis_set(basis, nset=nset, maxso=maxso)
          ALLOCATE (intso(nset*maxso, nset*maxso, 3))

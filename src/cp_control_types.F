@@ -513,10 +513,7 @@ MODULE cp_control_types
       REAL(kind=dp), DIMENSION(:), POINTER :: dipole_ref_point
       !
       ! SOC subsection
-      ! Number of Singlett states to be used
-      INTEGER                              :: soc_singlett
-      ! Number of triplett states to be used
-      INTEGER                              :: soc_triplett
+      LOGICAL                              :: do_soc
       !
       ! MGRID subsection
       !
@@ -926,6 +923,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ALLOCATE (tddfpt_control)
+      tddfpt_control%do_soc =.FALSE.
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt2_control_create

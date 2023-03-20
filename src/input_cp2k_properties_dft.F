@@ -1608,15 +1608,7 @@ CONTAINS
 
       CALL section_create(subsection, __LOCATION__, name="SOC", &
                           description="Is jet to be implemented", &
-                          n_keywords=2, n_subsections=0, repeats=.FALSE.)
-
-      CALL keyword_create(keyword, __LOCATION__, name="SINGLETT", &
-         description="Number of singlett states", &
-         repeats=.FALSE., n_var=1, & 
-         type_of_var=integer_t, &
-         default_i_val=-1)
-      CALL section_add_keyword(subsection, keyword)
-      CALL keyword_release(keyword)
+                          n_keywords=3, n_subsections=0, repeats=.FALSE.)
 
       CALL keyword_create(keyword, __LOCATION__, name="EPS_FILTER", &
                           variants=s2a("EPS_FILTER_MATRIX"), &
@@ -1640,11 +1632,13 @@ CONTAINS
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="TRIPLETT", &
-         description="Number of triplett states", &
-         repeats=.FALSE., n_var=1, &
-         type_of_var=integer_t, &
-         default_i_val=-1)
+      CALL keyword_create(keyword, __LOCATION__, name="GRID", &
+                          variants=(/"ATOMIC_GRID"/), &
+                          description="Specification of the atomic angular and radial grids for "// &
+                          "a atomic kind. This keyword must be repeated for all kinds!  "// &
+                          "Usage: GRID < LEBEDEV_GRID > < RADIAL_GRID >", &
+                          usage="GRID {string} {integer} {integer}", &
+                          n_var=3, type_of_var=char_t, repeats=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 

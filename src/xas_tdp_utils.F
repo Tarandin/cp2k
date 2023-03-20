@@ -1598,7 +1598,7 @@ CONTAINS
          CALL cp_fm_set_element(real_fm, 1 + nsc + isf, 1 + nsc + isf, sf_evals(isf))
       END DO
 
-! Create the bdcsr machinery
+! Create the dbcsr machinery
       CALL get_qs_env(qs_env, dbcsr_dist=dbcsr_dist)
       CALL dbcsr_distribution_get(dbcsr_dist, group=group, row_dist=row_dist, pgrid=pgrid, &
                                   npcols=npcols, nprows=nprows)
@@ -2001,13 +2001,13 @@ CONTAINS
       nex = nsg
       eps_filter = xas_tdp_control%eps_filter
 
- !     !! DEBUG!!
- !     output_unit = cp_logger_get_default_io_unit()
- !     IF (output_unit > 0) THEN
- !        CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
- !        CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
- !        CALL cp_fm_write_formatted(tp_coeffs, output_unit, "DEBUG TP")
- !     END IF
+      !! DEBUG!!
+      output_unit = cp_logger_get_default_io_unit()
+      IF (output_unit > 0) THEN
+         CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
+         CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
+         CALL cp_fm_write_formatted(tp_coeffs, output_unit, "DEBUG TP")
+      END IF
 
 !  Creating the real part and imaginary part of the final SOC fm
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
@@ -2026,6 +2026,7 @@ CONTAINS
          CALL cp_fm_set_element(real_fm, 1 + itp + ntp + nsg, 1 + itp + ntp + nsg, tp_evals(itp))
          CALL cp_fm_set_element(real_fm, 1 + itp + 2*ntp + nsg, 1 + itp + 2*ntp + nsg, tp_evals(itp))
       END DO
+
 
 !  Create the dbcsr machinery (for fast MM, the core of this routine)
       CALL get_qs_env(qs_env, dbcsr_dist=dbcsr_dist)
@@ -2295,6 +2296,12 @@ CONTAINS
 !  Set-up the complex hermitian perturbation matrix
       CALL cp_cfm_create(hami_cfm, full_struct)
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
+
+     !! DEBUG!!
+      output_unit = cp_logger_get_default_io_unit()
+      IF (output_unit > 0) THEN
+         CALL cp_fm_write_formatted(real_fm, output_unit, "DEBUG real_fm")
+      END IF
 
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
