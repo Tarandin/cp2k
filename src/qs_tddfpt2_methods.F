@@ -35,8 +35,7 @@ MODULE qs_tddfpt2_methods
    USE dbcsr_api,                       ONLY: dbcsr_copy,&
                                               dbcsr_create,&
                                               dbcsr_p_type,&
-                                              dbcsr_set,&
-                                              dbcsr_print
+                                              dbcsr_set
    USE exstates_types,                  ONLY: excited_energy_type
    USE header,                          ONLY: tddfpt_header,&
                                               tddfpt_soc_header
@@ -659,9 +658,7 @@ CONTAINS
                           " are distributed to different CPU pools.")
          END IF
          ! for gradients unshifted KS matrix
-         IF (ASSOCIATED(matrix_ks_oep)) THEN
-            CALL get_qs_env(qs_env, matrix_ks=matrix_ks)
-         END IF
+         IF (ASSOCIATED(matrix_ks_oep)) CALL get_qs_env(qs_env, matrix_ks=matrix_ks)
          CALL get_qs_env(qs_env, exstate_env=ex_env)
          state_change = .FALSE.
          IF (ex_env%state > 0) THEN
@@ -799,9 +796,8 @@ CONTAINS
       END DO
       DEALLOCATE (gs_mos)
 
-      IF (ASSOCIATED(matrix_ks_oep)) THEN
+      IF (ASSOCIATED(matrix_ks_oep)) &
          CALL dbcsr_deallocate_matrix_set(matrix_ks_oep)
-      END IF
 
       CALL timestop(handle)
 

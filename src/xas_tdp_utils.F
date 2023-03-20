@@ -1598,7 +1598,7 @@ CONTAINS
          CALL cp_fm_set_element(real_fm, 1 + nsc + isf, 1 + nsc + isf, sf_evals(isf))
       END DO
 
-! Create the dbcsr machinery
+! Create the bdcsr machinery
       CALL get_qs_env(qs_env, dbcsr_dist=dbcsr_dist)
       CALL dbcsr_distribution_get(dbcsr_dist, group=group, row_dist=row_dist, pgrid=pgrid, &
                                   npcols=npcols, nprows=nprows)
@@ -2026,7 +2026,6 @@ CONTAINS
          CALL cp_fm_set_element(real_fm, 1 + itp + ntp + nsg, 1 + itp + ntp + nsg, tp_evals(itp))
          CALL cp_fm_set_element(real_fm, 1 + itp + 2*ntp + nsg, 1 + itp + 2*ntp + nsg, tp_evals(itp))
       END DO
-
 
 !  Create the dbcsr machinery (for fast MM, the core of this routine)
       CALL get_qs_env(qs_env, dbcsr_dist=dbcsr_dist)

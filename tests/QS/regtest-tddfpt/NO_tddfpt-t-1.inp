@@ -12,8 +12,6 @@
        MAX_ITER    10
        MAX_KV      10
        CONVERGENCE 1.0e-5
-       &SOC
-       &END SOC
        &XC
          &XC_FUNCTIONAL BLYP
          &END XC_FUNCTIONAL

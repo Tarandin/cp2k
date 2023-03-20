@@ -161,11 +161,7 @@ CONTAINS
          CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set, &
                           basis_type=basis_type)
          NULLIFY (basis_set_list(ikind)%gto_basis_set)
-         IF (ASSOCIATED(basis_set)) THEN
-            basis_set_list(ikind)%gto_basis_set => basis_set
-         ELSE
-            CPABORT("Basis_set is not Associated!")
-         END IF
+         IF (ASSOCIATED(basis_set)) basis_set_list(ikind)%gto_basis_set => basis_set
       END DO
 
    END SUBROUTINE basis_set_list_setup

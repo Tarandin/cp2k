@@ -70,7 +70,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'qs_energies_properties'
 
       INTEGER                                            :: handle
-      LOGICAL                                            :: do_et,do_et_proj, do_tip_scan!,do_soc
+      LOGICAL                                            :: do_et, do_et_proj, do_tip_scan
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(pw_env_type), POINTER                         :: pw_env
@@ -78,7 +78,6 @@ CONTAINS
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(section_vals_type), POINTER                   :: input, proj_section, rest_b_section, &
                                                             tip_scan_section
-                                                         !,soc_section
 
       NULLIFY (atprop, energy, pw_env)
       CALL timeset(routineN, handle)
@@ -155,7 +154,7 @@ CONTAINS
       END IF
 
       IF (dft_control%tddfpt2_control%enabled) THEN
-           CALL tddfpt(qs_env, calc_forces)
+         CALL tddfpt(qs_env, calc_forces)
       END IF
 
       ! tip scan
