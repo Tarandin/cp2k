@@ -1288,8 +1288,12 @@ CONTAINS
       LOGICAL                                            :: do_ewald, do_exchange, expl, explicit, &
                                                             multigrid_set
       REAL(KIND=dp)                                      :: filter, fval, hfx
-      TYPE(section_vals_type), POINTER                   :: dipole_section, mgrid_section, &
-                                                            stda_section, xc_func, xc_section
+      TYPE(section_vals_type), POINTER                   ::dipole_section,&
+                                                           mgrid_section, &
+                                                           stda_section,&
+                                                           xc_func,&
+                                                           xc_section,&
+                                                           soc_section
 
       CALL timeset(routineN, handle)
 
