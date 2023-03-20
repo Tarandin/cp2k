@@ -37,7 +37,6 @@ MODULE qs_energy_utils
                                               qs_rho_type
    USE qs_scf,                          ONLY: scf
    USE qs_tddfpt2_methods,              ONLY: tddfpt
-   USE qs_tddfpt2_soc,                  ONLY: tddfpt_soc
    USE tip_scan_methods,                ONLY: tip_scanning
    USE xas_methods,                     ONLY: xas
    USE xas_tdp_methods,                 ONLY: xas_tdp
@@ -156,14 +155,7 @@ CONTAINS
       END IF
 
       IF (dft_control%tddfpt2_control%enabled) THEN
-         !NULLIFY (soc_section)
-         !soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
-         !CALL section_vals_get(soc_section, explicit=do_soc)
-         !IF (do_soc) THEN
-         !   CALL tddfpt_soc(qs_env)
-         !ELSE
            CALL tddfpt(qs_env, calc_forces)
-         !END IF
       END IF
 
       ! tip scan

@@ -909,7 +909,7 @@ CONTAINS
 
       END IF
 
-      IF (dft_control%do_xas_tdp_calculation) THEN
+      IF (dft_control%do_xas_tdp_calculation .OR. dft_control%tddfpt2_control%do_soc) THEN
          ! Check if RI_XAS basis is given, auto-generate if not
          CALL get_qs_env(qs_env, nkind=nkind)
          DO ikind = 1, nkind
@@ -943,7 +943,7 @@ CONTAINS
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_HXC")
          maxlgto = MAX(maxlgto, maxlgto_lri)
       END IF
-      IF (dft_control%do_xas_tdp_calculation) THEN
+      IF (dft_control%do_xas_tdp_calculation .OR. dft_control%tddfpt2_control%do_soc) THEN
          !done as a precaution
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_XAS")
          maxlgto = MAX(maxlgto, maxlgto_lri)
