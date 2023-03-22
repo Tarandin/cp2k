@@ -208,6 +208,7 @@ CONTAINS
       NULLIFY (tddfpt_section)
       tddfpt_section => section_vals_get_subs_vals(qs_env%input,&
                                              "PROPERTIES%TDDFPT")
+
       CALL tddfpt_input(qs_env,&
                         do_hfx,&
                         do_admm,&
@@ -230,7 +231,6 @@ CONTAINS
       tddfpt_control%do_admm = do_admm
       tddfpt_control%do_hfxlr = do_hfxlr
       tddfpt_control%do_exck = do_exck
-
 
        soc_section => section_vals_get_subs_vals(tddfpt_section, "SOC")
        CALL section_vals_get(soc_section, explicit=do_soc)
@@ -503,7 +503,6 @@ CONTAINS
 
       
       IF (do_soc) then
-         
             log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
                                              "PROGRAM_BANNER", &
                                              extension=".tddfptLog")
@@ -751,17 +750,22 @@ CONTAINS
       END IF
 
       ! clean up
-      DO istate = 1, SIZE(evects, 2)
-         DO ispin = 1, nspins
-            IF (do_soc) THEN
-               CALL cp_fm_release(evects_sing(ispin, istate))
-               CALL cp_fm_release(evects_trip(ispin, istate))
-            ELSE
+      IF (.NOT. do_soc) THEN
+       DO istate = 1, nspins
+          DO ispin = 1, SIZE(evects,2)
                CALL cp_fm_release(evects(ispin, istate))
-            END IF
                CALL cp_fm_release(S_evects(ispin, istate))
-         END DO
-      END DO
+          END DO
+       END DO
+      ELSE
+        DO istate = 1, nspins
+           DO ispin = 1, SIZE(evects_sing,2)
+              CALL cp_fm_release(evects_sing(ispin, istate))
+              CALL cp_fm_release(evects_trip(ispin, istate))
+              CALL cp_fm_release(S_evects(ispin, istate))
+           END DO
+        END DO
+      END IF
       
       IF (do_soc) THEN
          DEALLOCATE (evects_sing, S_evects, evals_sing, ostrength_sing)
@@ -1167,7 +1171,9 @@ CONTAINS
       CHARACTER(len=20)                                  :: nstates_str
       INTEGER                                            :: energy_unit, handle, ispin, istate, &
                                                             iter, log_unit, mult, &
-                                                            niters, nspins, nstates, nstates_read
+                                                            niters,nspins,nstates,&
+                                                            nstates_read,nstate_max,&
+                                                            nocc, nvirt
       LOGICAL                                            :: explicit,is_restarted
       REAL(kind=dp)                                      :: conv
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
@@ -1185,6 +1191,16 @@ CONTAINS
       TYPE(tddfpt_work_matrices)                         :: work_matrices
 
       CALL timeset(routineN, handle)
+
+      !! Too many states cal lead to Problems
+      !! You should be warnd if there are mor states 
+      !! then occ-virt Combinations!!
+      CALL cp_fm_get_info(gs_mos(1)%mos_occ, ncol_global=nocc)
+      CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
+      nstate_max = nocc * nvirt
+      IF (nstates > nstate_max) THEN
+         CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
+      END IF
 
       ALLOCATE (evals(nstates))
       ALLOCATE (evects(nspins, nstates), S_evects(nspins, nstates))
