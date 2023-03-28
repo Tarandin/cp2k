@@ -582,22 +582,14 @@ CONTAINS
                   "-------------------------------------------------------------------------------"
             END IF
 
-            IF (log_unit >0) THEN
-               DO istate= 1,SIZE(evals_sing)
-                  WRITE(log_unit, '(A)') "TDDFT      SINGLET      TRIPLET"
-                 write(log_unit,&
-               '(I3,5x,F10.6,5x,F10.6)') istate,evals_sing(istate)*27.2114_dp,&
-                                          evals_trip(istate)*27.2114_dp
-               END DO
-            END IF
-
-
+            !CPABORT("PART IS SKIPPT DUE TO DEGUB")
             CALL tddfpt_soc(qs_env,&
-                            tddfpt_print_section,&
                             evals_sing,&
                             evals_trip,&
                             evects_sing,&
-                            evects_trip)
+                            evects_trip)!,&
+                            !gs_mos,&
+                            !tddfpt_control)
 
             tddfpt_control%rks_triplets = mult_tmp
             
@@ -751,14 +743,14 @@ CONTAINS
 
       ! clean up
       IF (.NOT. do_soc) THEN
-       DO istate = 1, nspins
+       DO istate = 1, SIZE(evects,1)
           DO ispin = 1, SIZE(evects,2)
                CALL cp_fm_release(evects(ispin, istate))
                CALL cp_fm_release(S_evects(ispin, istate))
           END DO
        END DO
       ELSE
-        DO istate = 1, nspins
+        DO istate = 1, SIZE(evects_sing,1)
            DO ispin = 1, SIZE(evects_sing,2)
               CALL cp_fm_release(evects_sing(ispin, istate))
               CALL cp_fm_release(evects_trip(ispin, istate))

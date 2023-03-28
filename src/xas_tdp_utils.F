@@ -52,7 +52,7 @@ MODULE xas_tdp_utils
         dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
         dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric
+        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print
    USE input_constants,                 ONLY: ot_precond_full_single,&
                                               tddfpt_singlet,&
                                               tddfpt_spin_cons,&
@@ -78,6 +78,8 @@ MODULE xas_tdp_utils
    USE xas_tdp_types,                   ONLY: donor_state_type,&
                                               xas_tdp_control_type,&
                                               xas_tdp_env_type
+   !!DEBUG
+   !USE qs_tddfpt2_soc,                   ONLY: tddfpt_soc
 
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num
 #include "./base/base_uses.f90"
@@ -2001,13 +2003,23 @@ CONTAINS
       nex = nsg
       eps_filter = xas_tdp_control%eps_filter
 
-      !! DEBUG!!
-      output_unit = cp_logger_get_default_io_unit()
-      IF (output_unit > 0) THEN
-         CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
-         CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
-         CALL cp_fm_write_formatted(tp_coeffs, output_unit, "DEBUG TP")
-      END IF
+     ! !! DEBUG!!
+     ! output_unit = cp_logger_get_default_io_unit()
+     ! IF (output_unit > 0) THEN
+     !    CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
+     !    CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
+     !    CALL cp_fm_write_formatted(tp_coeffs, output_unit, "DEBUG TP")
+     !    !!DEBUG
+     !    CALL dbcsr_print(orb_soc_x, unit_nr=output_unit)
+     !    CALL dbcsr_print(orb_soc_y, unit_nr=output_unit)
+     !    CALL dbcsr_print(orb_soc_z, unit_nr=output_unit)
+     ! END IF
+
+     ! !!DEBUG
+    !  CALL tddfpt_soc(qs_env, donor_state%sg_evals,donor_state%tp_evals,&
+    !                  donor_state%sg_coeffs,donor_state%tp_coeffs,&
+    !                  gs_coeffs)
+    !  CPABORT("DEBUG FINISHED")
 
 !  Creating the real part and imaginary part of the final SOC fm
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
@@ -2297,10 +2309,12 @@ CONTAINS
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
      !! DEBUG!!
-      output_unit = cp_logger_get_default_io_unit()
-      IF (output_unit > 0) THEN
-         CALL cp_fm_write_formatted(real_fm, output_unit, "DEBUG real_fm")
-      END IF
+     ! output_unit = cp_logger_get_default_io_unit()
+     ! IF (output_unit > 0) THEN
+     !    CALL cp_fm_write_formatted(real_fm, output_unit, "DEBUG real_fm")
+     !    CALL cp_fm_write_formatted(img_fm, output_unit, "DEBUG imag_fm")
+     ! END IF
+
 
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
@@ -2314,18 +2328,19 @@ CONTAINS
       ALLOCATE (donor_state%soc_evals(ntot - 1))
       donor_state%soc_evals(:) = tmp_evals(2:ntot) - tmp_evals(1)
 
-      !! DEBUG::
-      output_unit = cp_logger_get_default_io_unit()
-      IF (output_unit > 0) THEN
-         DO itp = 1,SIZE(donor_state%soc_evals)
-            write(output_unit, '(I3,5x,F10.6)')  itp, donor_state%soc_evals(itp)
-         END DO
-      END IF
 !  Compute the dipole oscillator strengths
       CALL compute_soc_dipole_fosc(evecs_cfm, dbcsr_soc_package, donor_state, xas_tdp_env, &
                                    xas_tdp_control, qs_env)
 
-!  And the quadrupole (if needed)
+      !! DEBUG
+   !   output_unit = cp_logger_get_default_io_unit()
+   !   IF(output_unit > 0) THEN
+   !      DO itp = 1,SIZE(xas_tdp_env%dipmat)
+   !         CALL dbcsr_print(xas_tdp_env%dipmat(itp)%matrix, unit_nr=output_unit)
+   !      END DO
+   !   END IF
+
+  !And the quadrupole (if needed)
       IF (xas_tdp_control%do_quad) THEN
          CALL compute_soc_quadrupole_fosc(evecs_cfm, dbcsr_soc_package, donor_state, xas_tdp_env, &
                                           xas_tdp_control, qs_env)
@@ -2633,6 +2648,8 @@ CONTAINS
       NULLIFY (para_env, mo_coeff, mos, gsgs_struct, std_struct, tmp_struct, sggs_struct)
       NULLIFY (ao_op_i, dbcsr_tp, dbcsr_sg, dbcsr_ovlp, dbcsr_work, dbcsr_tmp, dbcsr_prod)
 
+      !!DEBUG
+   !output_unit = cp_logger_get_default_io_unit()
 !  Initialization
       gs_coeffs => donor_state%gs_coeffs
       sg_coeffs => donor_state%sg_coeffs
@@ -2668,6 +2685,18 @@ CONTAINS
       CALL cp_fm_create(work_fm, std_struct)
       ALLOCATE (gsgs_op(dim_op))
       ALLOCATE (gs_diag(homo))
+
+      !!DEBUG
+    !  IF (output_unit > 0) THEN
+    !     write(output_unit,'(I4)') homo
+    !     CALL cp_fm_write_formatted(mo_coeff, output_unit, "DEBUG MO_coeff")
+    !     write(output_unit,'(A)') "Überlappmatix"
+    !     CALL dbcsr_print(matrix_s(1)%matrix, unit_nr=output_unit)
+    !     write(output_unit,'(A)') "dbcsr_sg"
+    !     CALL dbcsr_print(dbcsr_sg, unit_nr=output_unit)
+    !     write(output_unit,'(A)') "dbcsr_tp"
+    !     CALL dbcsr_print(dbcsr_tp, unit_nr=output_unit)
+    !  END IF
 
       DO i = 1, dim_op
 
@@ -2995,6 +3024,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
+      !!DEBUG
+   !output_unit = cp_logger_get_default_io_unit()
+
       !init
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       do_os = xas_tdp_control%do_spin_cons
@@ -3024,6 +3056,13 @@ CONTAINS
          CALL get_rcs_amew_op(amew_dip, xas_tdp_env%dipmat, dbcsr_soc_package, donor_state, &
                               xas_tdp_control%eps_filter, qs_env)
       END IF
+
+      !!DEBUG
+  ! IF (output_unit > 0) THEN
+  !    DO i = 1, SIZE(amew_dip)
+  !       CALL cp_fm_write_formatted(amew_dip(i), output_unit, "DEBUG::amew_dip")
+  !    END DO
+  ! END IF
 
       DO i = 1, 3 !cartesian coord x, y, z
 

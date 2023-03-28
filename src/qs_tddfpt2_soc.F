@@ -24,9 +24,11 @@ MODULE qs_tddfpt2_soc
    USE cp_cfm_types,                    ONLY: cp_cfm_create,&
                                               cp_cfm_get_info,&
                                               cp_cfm_get_submatrix,&
+                                              cp_cfm_to_cfm,&!_columns,&
                                               cp_cfm_release,&
                                               cp_cfm_type,&
-                                              cp_fm_to_cfm
+                                              cp_fm_to_cfm,&
+                                              cp_cfm_to_fm
    USE cp_control_types,                ONLY: dft_control_type,&
                                               qs_control_type,&
                                               tddfpt2_control_type
@@ -174,7 +176,8 @@ MODULE qs_tddfpt2_soc
                                              calculate_density_coeffs,&
                                              compute_sphi_so, &
                                              truncate_radial_grid
-   USE xas_tdp_utils,                  ONLY: rcs_amew_soc_elements
+   !USE xas_tdp_utils,                  ONLY: rcs_amew_soc_elements
+   USE qs_tddfpt2_soc_utils,            ONLY: rcs_amew_soc_elements
    USE lebedev,                        ONLY: deallocate_lebedev_grids,&
                                              get_number_of_lebedev_grid,&
                                              init_lebedev_grids,&
@@ -193,6 +196,7 @@ MODULE qs_tddfpt2_soc
                                              clebsch_gordon_init
    USE memory_utilities,               ONLY: reallocate
    USE string_utilities,                ONLY: integer_to_string
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_get
 
 
 
@@ -236,22 +240,26 @@ CONTAINS
 !> \note Based on tddfpt2_methods and xas_tdp_utils.
 ! **************************************************************************************************
 
-   SUBROUTINE tddfpt_soc(qs_env, tddfpt_print_section, evals_a,&
-                         evals_b, evects_a, evects_b)
+   SUBROUTINE tddfpt_soc(qs_env, evals_a,&
+                         evals_b, evects_a, evects_b)!, gs)!, gs_mos,&
+                         !tddfpt_control)
 
       TYPE(qs_environment_type), POINTER               :: qs_env
       CHARACTER(LEN=*), PARAMETER                      :: routineN="tddfpt_soc"
-      INTEGER                                          :: handle,&
-                                                         log_unit,&
-                                                         istate
-      TYPE(section_vals_type), POINTER                 :: tddfpt_print_section
+      INTEGER                                          :: handle!,&
+                                                        ! log_unit,&
+                                                        ! istate
       TYPE(dft_control_type), POINTER                  :: dft_control
       REAL(kind=dp), INTENT(in), DIMENSION(:), TARGET  :: evals_a, &
                                                           evals_b
-      TYPE(cp_fm_type), DIMENSION(:, :)                :: evects_a, &
+      TYPE(cp_fm_type),DIMENSION(:,:)                  :: evects_a, &
                                                           evects_b
+      !TYPE(cp_fm_type), POINTER                        :: gs
       LOGICAL                                          :: do_os
       TYPE(cp_logger_type), POINTER                    :: logger
+   !   TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+   !      POINTER                                         :: gs_mos
+   !   TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
 
       NULLIFY(dft_control)
 
@@ -261,40 +269,22 @@ CONTAINS
       CALL get_qs_env(qs_env, dft_control=dft_control)
       do_os = dft_control%uks .OR. dft_control%roks
 
-      log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
-                                             "PROGRAM_BANNER", &
-                                             extension=".tddfptLog")
-
-      IF (log_unit >0) THEN
-        WRITE(log_unit, '(A)') "TDDFT      SINGLET      TRIPLET"
-        DO istate= 1,SIZE(evals_a)
-          write(log_unit,&
-        '(I3,5x,F10.6,5x,F10.6)') istate,evals_a(istate)*27.2114_dp,&
-                                   evals_b(istate)*27.2114_dp
-        END DO
-      END IF
-!!DEBUG::
-!      CALL print_soc(tddfpt_print_section, "SOC_PRINT",logger,".db",&
-!                        real_vec=evals_a,&
-!                        real_vec2=evals_b,&
-!                        real1=27.2114_dp,&
-!                        real2=27.2114_dp,&
-!                        header="TDDFT      SINGLET      TRIPLET")
-
       IF (do_os) THEN
-         CALL tddfpt_soc_os(qs_env, tddfpt_print_section, evals_a,&
+         CALL tddfpt_soc_os(qs_env, evals_a,&
                              evals_b, evects_a, evects_b)
       ELSE
-         CALL tddfpt_soc_rcs(qs_env, tddfpt_print_section, evals_a,&
-                         evals_b, evects_a, evects_b)
+         CALL tddfpt_soc_rcs(qs_env, evals_a,&
+                             evals_b, evects_a, evects_b)!,gs)!,gs_mos,&
+                             !tddfpt_control)
       END IF
 
       CALL timestop(handle)
       
    END SUBROUTINE
 
-   SUBROUTINE tddfpt_soc_rcs(qs_env, tddfpt_print_section, evals_sing,&
-                         evals_trip, evects_sing, evects_trip)
+   SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,&
+                         evals_trip, evects_sing, evects_trip)!, gs)!,gs_mos,&
+                       !  tddfpt_control)
 
       TYPE(qs_environment_type), POINTER        :: qs_env
       CHARACTER(LEN=*), PARAMETER               :: routineN ="tddfpt_soc_rcs"
@@ -331,6 +321,7 @@ CONTAINS
                                                    hami_cfm
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER :: matrix_s
       TYPE(cp_fm_type), POINTER                 :: gs_coeffs,&
+      !                                             gs,&
                                                    sg_coeffs, &
                                                    tp_coeffs
       TYPE(cp_fm_type)                          :: prod_fm, &
@@ -376,14 +367,23 @@ CONTAINS
                                                    mo_soc_z, &
                                                    gstp_block
       TYPE(dbcsr_soc_package_type)              :: dbcsr_soc_package
+    !  !!DEBUG
+    !   TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ
+    !   TYPE(cp_fm_type), DIMENSION(:, :), ALLOCATABLE     :: soc_evects
+    !   INTEGER                                            :: log_unit
+    !    TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+    !      POINTER                                         :: gs_mos
+    !   TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
 
       CALL timeset(routineN, handle)
 
        NULLIFY (logger, full_struct, pgrid, row_dist, row_dist_new)
        NULLIFY (col_dist, col_blk_size, row_blk_size, matrix_s)
-       NULLIFY (gstp_struct)
+       NULLIFY (gstp_struct, tddfpt_print_section, soc_section)
       logger => cp_get_default_logger()
 
+      tddfpt_print_section => section_vals_get_subs_vals(qs_env%input, &
+                                       "PROPERTIES%TDDFPT%PRINT")
       soc_section => section_vals_get_subs_vals(qs_env%input, &
                                        "PROPERTIES%TDDFPT%SOC")
       CALL section_vals_val_get(soc_section, "EPS_FILTER", r_val=eps_filter)
@@ -397,29 +397,27 @@ CONTAINS
 !! Initzialize Working envirment
       CALL inititialize_soc(qs_env, soc_atom_env, soc_env, & 
                             evects_sing,&
-                            evects_trip, dipol_form)
+                            evects_trip,&
+                            dipol_form)
 
       blacs_env => soc_env%blacs_env
       para_env => soc_env%para_env
       mos => soc_env%mos
       nmo => soc_env%nmo
       nao => soc_env%nao
+
       CALL get_qs_env(qs_env, matrix_s= matrix_s)
 
-
       gs_coeffs => soc_env%gs_coeff
-      !!DEBUG
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".gswf", &
-                     fm_matrix=gs_coeffs ,&
-                        header="GS MOs")
 
        !! This will create the H^SOC, but in an atomic basis !!
       CALL integrate_soc_atoms(soc_env%orb_soc, qs_env, soc_atom_env=soc_atom_env)
+     
      !! DEBUG::
       DO i = 1,3
       CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".aosoc", &
                      dbcsr_matrix=soc_env%orb_soc(i) ,&
-                        dbcsr2fm=.TRUE., blacs_env=blacs_env, &
+                       !dbcsr2fm=.TRUE., blacs_env=blacs_env, &
                         header="<PHI|H^SOC|PHI> in atomic orital basis",&
                         starter="<PHI|H^SOC|PHI>")
       END DO
@@ -436,14 +434,14 @@ CONTAINS
       orb_soc_y => soc_env%orb_soc(2)%matrix
       orb_soc_z => soc_env%orb_soc(3)%matrix
 
-      !!DEBUG::
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".sgwf", &
-                     fm_matrix=sg_coeffs ,&
-                     header="Excitation Vectors Singels",&
-                     starter="Singels")
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".tpwf", &
-                     fm_matrix=tp_coeffs ,&
-                        header="Excitation Vectors Tripletts")
+   !   !!DEBUG::
+   !   CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".sgwf", &
+   !                  fm_matrix=sg_coeffs ,&
+   !                  header="Excitation Vectors Singels",&
+   !                  starter="Singels")
+   !   CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".tpwf", &
+   !                  fm_matrix=tp_coeffs ,&
+   !                     header="Excitation Vectors Tripletts")
 
 
 
@@ -469,13 +467,6 @@ CONTAINS
          CALL cp_fm_set_element(real_fm,&
             1 + itp + 2*ntp + nsg, 1 + itp + 2*ntp + nsg, evals_trip(itp))
       END DO
-
-      !! DEBUG:: 
-     CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".realfm", &
-                     fm_matrix=real_fm ,&
-                     header="real part State x State Matrix",&
-                     starter="<PSI^S|PSI^T>")
-
 
 
    !!Create the dbcsr structures for this calculations
@@ -592,10 +583,10 @@ CONTAINS
       !! Precompute the <phi_i^0|H^SOC|phi_j^0> matrix elements
       ALLOCATE (mo_soc_x(nmo,nmo), mo_soc_y(nmo,nmo), mo_soc_z(nmo,nmo))
 
-      CALL cp_dbcsr_sm_fm_multiply(orb_soc_x, gs_coeffs, vec_soc_x, ncol=nmo)
+      CALL cp_dbcsr_sm_fm_multiply(orb_soc_x,gs_coeffs,vec_soc_x,ncol=nmo)
       CALL parallel_gemm('T', 'N', nmo,&
                          nmo, nao, 1.0_dp,&
-                         gs_coeffs, vec_soc_x,&
+                         gs_coeffs,vec_soc_x,&
                          0.0_dp, prod_fm)
       CALL cp_fm_get_submatrix(prod_fm, mo_soc_x)
 
@@ -640,8 +631,11 @@ CONTAINS
                                   start_row=(itp-1)*nmo+1, start_col=1, &
                                   n_rows=nmo, n_cols=nmo)
          diag(:) = get_diag(gstp_block)
-         soc_gst = sqrt2*SUM(diag)
-         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
+         soc_gst = SUM(diag)
+         !!  <0|H_x|T^-1>
+         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + itp, -1_dp*soc_gst)
+         !! <0|H_x|T^+1>
+         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst)
       END DO
 
       !gs-triplet with Ms=+-1, real part
@@ -955,12 +949,12 @@ CONTAINS
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
       !!DEBUG::
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".realfm",&
+      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".compsoc",&
                         fm_matrix=real_fm, header="SOC terms real",&
                         starter="fm real matrix of SOC terms")
 
       !!DEBUG::
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".imgfm",&
+      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger,".compsoc",&
                         fm_matrix=img_fm, header="SOC terms img",&
                         starter="fm img matrix of SOC terms")
 
@@ -984,16 +978,49 @@ CONTAINS
       CALL print_soc(tddfpt_print_section, "SOC_PRINT",logger,".spectrum",&
                         real_vec=soc_env%soc_evals,&
                         real_vec2=soc_env%soc_osc,&
-                        real1=27.2114_dp,&
+                        real1=27.21139613179_dp,&
                         header="SOC OSCILLATOR STRENGTH")
 
       !!DEBUG::
-      DO i = 1, SIZE(soc_env%dipmat)
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".debug", &
-                     dbcsr_matrix=soc_env%dipmat(i),&
-                     header="DEBUG DIPOL OPERATOR")
-      END DO
-   
+  !    DO i = 1, SIZE(soc_env%dipmat)
+  !    CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".debug", &
+  !                   dbcsr_matrix=soc_env%dipmat(i),&
+  !                   !dbcsr2fm=.TRUE.,&
+  !                   !blacs_env=blacs_env,&
+  !                   header="DEBUG DIPOL OPERATOR")
+  !    END DO
+
+  !    !!DEBUG
+  !    log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
+  !                                           "PROGRAM_BANNER", &
+  !                                           extension=".tddfptLog")
+
+  !    CALL tddfpt_dipole_operator(dipole_op_mos_occ, tddfpt_control,gs_mos, qs_env)
+
+  !    !!DEBUG::
+  !    DO i = 1, SIZE(dipole_op_mos_occ,1)
+  !       DO itp = 1, SIZE(dipole_op_mos_occ,2)
+  !       CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".debug2", &
+  !                   fm_matrix=dipole_op_mos_occ(i,itp),&
+  !                   header="DEBUG DIPOL OPERATOR")
+  !       END DO
+  !    END DO
+
+  !    CALL split_cfm_into_fm(evecs_cfm,&
+  !                           soc_evects,&
+  !                           ntot,&
+  !                           evects_sing(1,1)%matrix_struct) 
+
+  !    soc_env%soc_osc = 0.0_dp
+  !    CALL tddfpt_print_summary(log_unit,&
+  !                              soc_evects,&
+  !                              soc_env%soc_evals,&
+  !                              soc_env%soc_osc,&
+  !                              1, &
+  !                              dipole_op_mos_occ,&
+  !                              dipol_form)
+  ! 
+  !   !!END DEBUG
 
 !! clean up
      CALL soc_env_release(soc_env)
@@ -1016,7 +1043,7 @@ CONTAINS
 
    END SUBROUTINE tddfpt_soc_rcs
 
-   SUBROUTINE tddfpt_soc_os(qs_env, tddfpt_print_section, evals_sc,&
+   SUBROUTINE tddfpt_soc_os(qs_env, evals_sc,&
                          evals_sf, evects_sc, evects_sf)
 
       TYPE(qs_environment_type), POINTER             :: qs_env
@@ -1067,7 +1094,7 @@ CONTAINS
                                                         vec_soc_x, &
                                                         vec_soc_y, &
                                                         vec_soc_z
-      TYPE(cp_fm_type), DIMENSION(:, :)              :: evects_sc, &
+      TYPE(cp_fm_type),DIMENSION(:,:)                :: evects_sc, &
                                                         evects_sf
       TYPE(cp_fm_struct_type), POINTER               :: vec_struct,&
                                                         work_struct,&
@@ -1110,6 +1137,8 @@ CONTAINS
        NULLIFY (gsex_struct, dft_control, do_uks, do_roks)
       logger => cp_get_default_logger()
 
+      tddfpt_print_section => section_vals_get_subs_vals(qs_env%input, &
+                                       "PROPERTIES%TDDFPT%PRINT")
       soc_section => section_vals_get_subs_vals(qs_env%input, &
                                        "PROPERTIES%TDDFPT%SOC")
       CALL section_vals_val_get(soc_section, "EPS_FILTER", r_val=eps_filter)
@@ -1168,18 +1197,6 @@ CONTAINS
       orb_soc_x => soc_env%orb_soc(1)%matrix
       orb_soc_y => soc_env%orb_soc(2)%matrix
       orb_soc_z => soc_env%orb_soc(3)%matrix
-
-      !!DEBUG::
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".gswf", &
-                     fm_matrix=gs_coeffs ,&
-                        header="GS MOs")
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".scwf", &
-                     fm_matrix=sc_coeffs ,&
-                     header="Excitation Vectors Singels",&
-                     starter="Singels")
-      CALL print_soc(tddfpt_print_section, "SOC_PRINT", logger, ".sfwf", &
-                     fm_matrix=sf_coeffs ,&
-                        header="Excitation Vectors Tripletts")
 
 
       !! Create a matrix-structure, which links all states in this calculation
@@ -1531,7 +1548,7 @@ CONTAINS
                                evects_a, evects_b,&
                                dipole_form)
          !! Different Types 
-         TYPE(cp_fm_type), DIMENSION(:,:)                 ::evects_a,&
+         TYPE(cp_fm_type),DIMENSION(:,:)                  ::evects_a,&
                                                             evects_b
          TYPE(qs_environment_type), POINTER, INTENT(IN)   :: qs_env
          TYPE(qs_kind_type), DIMENSION(:), POINTER        :: qs_kind_set
@@ -1563,7 +1580,7 @@ CONTAINS
                  a_coeff, b_coeff, grid_info)
 
          do_os = .FALSE.
-         IF (SIZE(evects_a,1) > 1) do_os=.TRUE.
+         !IF (SIZE(evects_a,1) > 1) do_os=.TRUE.
 
          CALL soc_env_create(soc_env)
          CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set,& 
@@ -1620,6 +1637,10 @@ CONTAINS
 
          CALL get_mo_set(soc_env%mos(1), mo_coeff=soc_env%gs_coeff,&
          nmo=soc_env%nmo, nao=soc_env%nao)
+
+         !!DEBUG
+         !a_coeff = evects_a
+         !b_coeff = evects_b
 
          CALL soc_contract_evect(evects_a,&
                                  a_coeff,&
@@ -1682,7 +1703,7 @@ CONTAINS
             CALL integer_to_string(nrep,str_nrep)
             message = "Every kind needs a Grid. There are "//trim(str_nrep)
             message = trim(message)//"and "//trim(str_nkinds)//" are nedded"
-            CPABORT(message)
+            !CPABORT(message)
          END IF
          !! Prepare the atomic grid we need to calculate the SOC Operator in an Atomic basis
          
@@ -2116,6 +2137,39 @@ SUBROUTINE soc_contract_evect(fm_start, fm_res, blacs_env,para_env)
 
 END SUBROUTINE  soc_contract_evect
 
+SUBROUTINE split_cfm_into_fm(cfm, fm, nstat, struct)
+       TYPE(cp_fm_type), INTENT(out), DIMENSION(:,:),&
+       ALLOCATABLE                                    :: fm
+       TYPE(cp_fm_struct_type)                        :: struct
+       TYPE(cp_cfm_type), INTENT(in)                  :: cfm
+       TYPE(cp_cfm_type)                              :: help
+       INTEGER                                        :: nstat,&
+                                                         ncol,&
+                                                         nrow,&
+                                                         i
+      !CALL cp_cfm_create(help,struct)
+      CALL cp_fm_struct_get(struct,&
+                            nrow_global=nrow, &
+                            ncol_global=ncol)
+      ALLOCATE(fm(1,nstat))
+
+      DO i=1,nstat
+         CPWARN("create help")
+         CALL cp_cfm_create(help,struct)
+         CPWARN("copy to help")
+         CALL cp_cfm_to_cfm(cfm, help,ncol=ncol,source_start=(1+ncol*(i-1))) !_columns(cfm, help, ncol, 1+ncol*(i-1))
+         CPWARN("create fm")
+         CALL cp_fm_create(fm(1,i), struct)
+         CPWARN("copy from help")
+         CALL cp_cfm_to_fm(help, mtargetr=fm(1,i))
+         CALL cp_cfm_release(help)
+      END DO
+
+      !CALL cp_cfm_release(help)
+
+END SUBROUTINE split_cfm_into_fm
+
+
 SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                      soc_evecs_cfm, eps_filter, dipol_form,&
                      do_os)
@@ -2137,11 +2191,16 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
    TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)   :: amew_dip
    TYPE(dbcsr_soc_package_type)                  :: dbcsr_soc_package
    LOGICAL                                       :: do_os
+   !!DEBUG
+   !INTEGER                                        :: output_unit
 
    NULLIFY (para_env, blacs_env, dip_struct, full_struct, osc_str)
    NULLIFY (soc_evals)
 
    CALL timeset(routineN, handle)
+
+   !!DEBUG
+   !output_unit = cp_logger_get_default_io_unit()
 
    blacs_env => soc_env%blacs_env
    para_env => soc_env%para_env
@@ -2177,6 +2236,13 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                            eps_filter,&
                            qs_env)
    END IF
+
+   !!DEBUG
+   !IF (output_unit > 0) THEN
+   !   DO i = 1, SIZE(amew_dip)
+   !      CALL cp_fm_write_formatted(amew_dip(i), output_unit, "DEBUG::amew_dip")
+   !   END DO
+   !END IF
 
    DO i = 1, 3 !cartesian coord x, y, z
 
@@ -2283,8 +2349,13 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
    TYPE(cp_para_env_type), POINTER            :: para_env
    INTEGER                                    :: handle
    CHARACTER(len=*), PARAMETER                :: routineN = "get_rcs_amew_op"
+   !!DEBUG
+   !INTEGER                                    :: output_unit
+   
 
    CALL timeset(routineN, handle)
+   !!DEBUG
+   !output_unit = cp_logger_get_default_io_unit()
 
 
    NULLIFY (gs_coeffs, sg_coeffs, matrix_s, full_struct, prod_struct)
@@ -2328,6 +2399,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
 
 !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
       CALL get_mo_set(mos(1), mo_coeff=mo_coeff, nao=nao, homo=homo)
+
       CALL cp_fm_struct_create(gsgs_struct,&
                                context=blacs_env,&
                                para_env=para_env, &
@@ -2344,7 +2416,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
 
          ao_op_i => ao_op(i)%matrix
 
-         CALL cp_dbcsr_sm_fm_multiply(ao_op_i, mo_coeff, work_fm, ncol=homo)
+         CALL cp_dbcsr_sm_fm_multiply(ao_op_i, mo_coeff, work_fm,ncol=homo)
          CALL parallel_gemm('T', 'N', homo,&
                             homo, nao,&
                             1.0_dp, mo_coeff,&
@@ -2705,6 +2777,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
       NULLIFY (dbcsr_sc, dbcsr_sf, dbcsr_ovlp, dbcsr_work, dbcsr_tmp, dbcsr_prod)
 
    !  Initialization
+       ao_op => soc_env%dipmat
       gs_coeff => soc_env%gs_coeff
       sc_coeffs => soc_env%a_coeff
       sf_coeffs => soc_env%b_coeff

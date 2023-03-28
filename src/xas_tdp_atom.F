@@ -1016,10 +1016,10 @@ CONTAINS
             idx_to_nb(neighbors(inb)) = inb
          END DO
 
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, FMT="(T7,I12,I21)") &
-               exat, nnb
-         END IF
+         !   IF (output_unit > 0) THEN
+         !      WRITE (output_unit, FMT="(T7,I12,I21)") &
+         !         exat, nnb
+         !   END IF
 
          !Get the neighbor lists for the overlap integrals (abc), centers c on the current
          !excited atom and its neighbors defined by RI_RADIUS
@@ -1027,8 +1027,8 @@ CONTAINS
          CALL build_xas_tdp_3c_nl(ac_list, basis_set_orb, basis_set_ri, do_potential_id, &
                                   qs_env, excited_atoms=neighbors)
 
-         IF (ASSOCIATED(ab_list)) CPABORT("ab_list is not associated")
-         IF (ASSOCIATED(ac_list)) CPABORT("ac_list is not associated")
+         IF (ASSOCIATED(ab_list)) CPWARN("ab_list is not associated")
+         IF (ASSOCIATED(ac_list)) CPWARN("ac_list is not associated")
 
          !Compute the 3-center overlap integrals
          pot%potential_type = do_potential_id
