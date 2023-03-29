@@ -246,9 +246,9 @@ CONTAINS
 
       TYPE(qs_environment_type), POINTER               :: qs_env
       CHARACTER(LEN=*), PARAMETER                      :: routineN="tddfpt_soc"
-      INTEGER                                          :: handle!,&
-                                                        ! log_unit,&
-                                                        ! istate
+      INTEGER                                          :: handle,&
+                                                         log_unit,&
+                                                         istate
       TYPE(dft_control_type), POINTER                  :: dft_control
       REAL(kind=dp), INTENT(in), DIMENSION(:), TARGET  :: evals_a, &
                                                           evals_b
@@ -266,16 +266,34 @@ CONTAINS
       CALL timeset(routineN, handle)
       logger => cp_get_default_logger()
 
+      log_unit = cp_logger_get_default_io_unit()
+
+      IF (log_unit > 0) THEN
+         WRITE(log_unit,'(A)') "Starting from TDDFPT Excited States:"
+         WRITE(log_unit,'(A)') "      STATE           SINGLET          TRIPLET"
+         DO istate = 1, SIZE(evals_a)
+            WRITE(log_unit,'(6X,I3,11X,F10.5,6X,F10.5)') istate, evals_a(istate), evals_b(istate)
+         END DO
+      END IF
+
       CALL get_qs_env(qs_env, dft_control=dft_control)
       do_os = dft_control%uks .OR. dft_control%roks
 
       IF (do_os) THEN
+         IF (log_unit > 0) WRITE(log_unit,'(A)') "Starting open shell:"
+         CPABORT("Open Shell systems have not been fully implemented yet!")
          CALL tddfpt_soc_os(qs_env, evals_a,&
                              evals_b, evects_a, evects_b)
       ELSE
+         IF (log_unit > 0) WRITE(log_unit,'(A)') "Starting restricted closed shell:"
          CALL tddfpt_soc_rcs(qs_env, evals_a,&
                              evals_b, evects_a, evects_b)!,gs)!,gs_mos,&
                              !tddfpt_control)
+      END IF
+
+      IF (log_unit > 0) THEN
+         WRITE(log_unit, '(A,/,A)') "SOC Calculation terminated",&
+         "Returning to TDDFPT for Force calculation and deallocations"
       END IF
 
       CALL timestop(handle)

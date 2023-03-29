@@ -180,24 +180,19 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(excited_energy_type), POINTER                 :: ex_env
       TYPE(full_kernel_env_type), TARGET                 :: full_kernel_env, &
-                                                            kernel_env_admm_aux, &
-                                                            full_kernel_env_tmp, &
-                                                            kernel_env_admm_aux_tmp
-      TYPE(kernel_env_type)                              :: kernel_env, &
-                                                            kernel_env_tmp
+                                                            kernel_env_admm_aux
+      TYPE(kernel_env_type)                              :: kernel_env
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(qs_scf_env_type), POINTER                     :: scf_env
       TYPE(section_vals_type), POINTER                   :: lri_section, &
                                                             tddfpt_print_section, tddfpt_section, &
                                                             xc_section, soc_section
-      TYPE(stda_env_type), TARGET                        :: stda_kernel, &
-                                                            stda_kernel_tmp
+      TYPE(stda_env_type), TARGET                        :: stda_kernel
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
-      TYPE(tddfpt_work_matrices)                         :: work_matrices, &
-                                                            work_matrices_tmp
+      TYPE(tddfpt_work_matrices)                         :: work_matrices
       
       CALL timeset(routineN, handle)
 
@@ -234,6 +229,11 @@ CONTAINS
 
        soc_section => section_vals_get_subs_vals(tddfpt_section, "SOC")
        CALL section_vals_get(soc_section, explicit=do_soc)
+
+       IF (do_soc) THEN
+          mult_tmp = tddfpt_control%rks_triplets
+          tddfpt_control%rks_triplets = .NOT.(tddfpt_control%rks_triplets)
+       END IF
 
       CALL cite_reference(Iannuzzi2005)
       IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
@@ -289,6 +289,7 @@ CONTAINS
          END IF
       END IF
 
+
       ! split mpi communicator
       ALLOCATE (my_mos(nspins))
       DO ispin = 1, nspins
@@ -298,10 +299,6 @@ CONTAINS
                                kernel=tddfpt_control%kernel)
       DEALLOCATE (my_mos)
 
-      IF (do_soc) THEN 
-         qs_tmp=qs_env
-         qs_env_tmp => qs_tmp
-      END IF
 
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
          ! create environment for Full Kernel
@@ -407,95 +404,6 @@ CONTAINS
          CPABORT('Unknown kernel type')
       END IF
 
-      !! We need a secound kernel for a soc calculation with different multiplicity
-      IF (do_soc) THEN
-
-         CALL tddfpt_create_work_matrices(work_matrices_tmp,&
-                     gs_mos,nstates, do_hfx, do_admm, qs_env_tmp,&
-                     sub_env)
-         CALL tddfpt_construct_ground_state_orb_density(&
-                rho_orb_struct=work_matrices_tmp%rho_orb_struct_sub, &
-                rho_xc_struct=work_matrices_tmp%rho_xc_struct_sub, &
-                is_rks_triplets=(.NOT.tddfpt_control%rks_triplets), &
-                qs_env=qs_env_tmp, sub_env=sub_env, &
-                wfm_rho_orb=work_matrices_tmp%rho_ao_orb_fm_sub)
-         IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
-             IF (do_admm) THEN
-                  ! Full kernel with ADMM
-                  IF (tddfpt_control%admm_xc_correction) THEN
-                     CALL create_kernel_env(kernel_env=full_kernel_env_tmp, &
-                        rho_struct_sub=work_matrices_tmp%rho_orb_struct_sub, &
-                        xc_section=admm_env%xc_section_primary, &
-                        is_rks_triplets=(.NOT.tddfpt_control%rks_triplets),&
-                        sub_env=sub_env)
-                   ELSE
-                     CALL create_kernel_env(kernel_env=full_kernel_env_tmp, &
-                        rho_struct_sub=work_matrices_tmp%rho_orb_struct_sub, &
-                        xc_section=xc_section, &
-                        is_rks_triplets=(.NOT.tddfpt_control%rks_triplets),&
-                        sub_env=sub_env)
-                   END IF !addmm_xc_correction
-   
-                   CALL tddfpt_construct_aux_fit_density(&
-                      rho_orb_struct=work_matrices_tmp%rho_orb_struct_sub, &
-                      rho_aux_fit_struct=work_matrices_tmp%rho_aux_fit_struct_sub, &
-                      local_rho_set=sub_env%local_rho_set_admm, &
-                      qs_env=qs_env, sub_env=sub_env, &
-                      wfm_rho_orb=work_matrices_tmp%rho_ao_orb_fm_sub, &
-                      wfm_rho_aux_fit=work_matrices_tmp%rho_ao_aux_fit_fm_sub, &
-                      wfm_aux_orb=work_matrices_tmp%wfm_aux_orb_sub)
-
-                    CALL create_kernel_env(kernel_env=kernel_env_admm_aux_tmp, &
-                       rho_struct_sub=work_matrices_tmp%rho_aux_fit_struct_sub, &
-                       xc_section=admm_env%xc_section_aux, &
-                       is_rks_triplets=(.NOT.tddfpt_control%rks_triplets),&
-                       sub_env=sub_env)
-                    kernel_env_tmp%full_kernel => full_kernel_env_tmp
-                    kernel_env_tmp%admm_kernel => kernel_env_admm_aux_tmp
-             ELSE 
-                  ! Full kernel
-                   CALL create_kernel_env(kernel_env=full_kernel_env_tmp, &
-                      rho_struct_sub=work_matrices_tmp%rho_orb_struct_sub, &
-                      xc_section=xc_section, &
-                      is_rks_triplets=(.NOT.tddfpt_control%rks_triplets),&
-                      sub_env=sub_env)
-                   kernel_env_tmp%full_kernel => full_kernel_env_tmp
-                   NULLIFY (kernel_env_tmp%admm_kernel)
-            END IF  !do_admm
-         ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
-            ! sTDA kernel
-            nactive = 0
-            CALL cp_fm_get_info(gs_mos(1)%mos_occ, nrow_global=nao)
-            DO ispin = 1, SIZE(gs_mos)
-               CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, &
-                                    ncol_global=nactive(ispin))
-            END DO ! ispins
-            CALL allocate_stda_env(qs_env, stda_kernel, nao, nactive)
-            ! sTDA parameters
-            CALL stda_init_param(qs_env, stda_kernel, &
-                                 tddfpt_control%stda_control)
-            ! allocate pools and work matrices
-            nstates = tddfpt_control%nstates
-            CALL stda_create_work_matrices(work_matrices_tmp, gs_mos, &
-                                          nstates,  qs_env, sub_env)
-            !
-            CALL stda_init_matrices(qs_env, stda_kernel_tmp, sub_env, &
-                                    work_matrices_tmp, tddfpt_control)
-            !
-            kernel_env_tmp%stda_kernel => stda_kernel_tmp
-            NULLIFY (kernel_env_tmp%full_kernel)
-            NULLIFY (kernel_env_tmp%admm_kernel)
-         ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
-            ! allocate pools and work matrices
-            nstates = tddfpt_control%nstates
-            CALL stda_create_work_matrices(work_matrices_tmp, gs_mos, &
-                                           nstates, qs_env, sub_env)
-            NULLIFY (kernel_env_tmp%full_kernel)
-            NULLIFY (kernel_env_tmp%admm_kernel)
-            NULLIFY (kernel_env_tmp%stda_kernel)
-         END IF !no kernel
-      END IF !do_soc
-
       IF (tddfpt_control%do_lrigpw) THEN
          CALL tddfpt2_lri_init(qs_env, kernel_env, lri_section, &
                               tddfpt_print_section)
@@ -503,47 +411,57 @@ CONTAINS
 
       
       IF (do_soc) then
-            log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
-                                             "PROGRAM_BANNER", &
+
+         qs_tmp = qs_env
+         qs_env_tmp => qs_tmp
+         !mult_tmp = tddfpt_control%rks_triplets
+          log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
+                                            "PROGRAM_BANNER", &
                                              extension=".tddfptLog")
             CALL tddfpt_soc_header(log_unit)
+         !! work_matrrices should be the requested multiplicity for the
+         !! gradient calcualtion!
+         IF (mult_tmp) THEN
+
+            !tddfpt_control%rks_triplets = .FALSE.
             IF (log_unit > 0) THEN
                WRITE (log_unit, "(1X,A)") "", &
                   "-------------------------------------------------------------------------------", &
                   "-------------------------------------------------------------------------------", &
                   "-                      TDDFPT SINGLET ENERGIES                                -"
-             END IF
-
-           mult_tmp = tddfpt_control%rks_triplets
-            tddfpt_control%rks_triplets = .FALSE.
-            !! work_matrrices should be the requested multiplicity for the
-            !! gradient calcualtion!
-            IF (.NOT. mult_tmp) THEN
-               CALL tddfpt_energies(qs_env, nstates, &
-                                    nspins, work_matrices, &
-                                    tddfpt_control, logger, &
-                                    tddfpt_print_section, &
-                                    evects_sing,evals_sing, &
-                                     gs_mos,tddfpt_section, &
-                                     S_evects, matrix_s, &
-                                     kernel_env, matrix_ks, &
-                                     sub_env, ostrength_sing, &
-                                     dipole_op_mos_occ, 1)
+            END IF
+            CALL tddfpt_energies(qs_env_tmp, nstates, &
+                                  nspins, work_matrices, &
+                                  tddfpt_control, logger, &
+                                  tddfpt_print_section, &
+                                  evects_sing,evals_sing, &
+                                  gs_mos,tddfpt_section, &
+                                  S_evects_tmp, matrix_s, &
+                                  kernel_env, matrix_ks, &
+                                  sub_env, ostrength_sing, &
+                                  dipole_op_mos_occ, 1)
+            !! We need to clean up the tmp structures
+            IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
+               IF (do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
+               IF (tddfpt_control%do_lrigpw) THEN
+                  CALL lri_env_release(kernel_env%full_kernel%lri_env)
+                  DEALLOCATE (kernel_env%full_kernel%lri_env)
+                  CALL lri_density_release(kernel_env%full_kernel%lri_density)
+                  DEALLOCATE (kernel_env%full_kernel%lri_density)
+               END IF
+                  CALL release_kernel_env(kernel_env%full_kernel)
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
+               CALL deallocate_stda_env(stda_kernel)
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
+               !
             ELSE
-               CALL tddfpt_energies(qs_env_tmp, nstates, &
-                                    nspins,work_matrices_tmp, &
-                                    tddfpt_control, logger, &
-                                    tddfpt_print_section, &
-                                    evects_sing,evals_sing, &
-                                     gs_mos,tddfpt_section, &
-                                     S_evects_tmp,matrix_s, &
-                                     kernel_env_tmp, matrix_ks, &
-                                     sub_env, ostrength_sing, &
-                                     dipole_op_mos_occ, 1)
-            END IF !not mult_tmp
+               CPABORT('Unknown kernel type')
+            END IF
 
-            log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, &
-                                          "PROGRAM_BANNER", extension=".tddfptLog")
+            CALL tddfpt_release_work_matrices(work_matrices, sub_env)
+            NULLIFY(qs_env_tmp)
+            DEALLOCATE(S_evects_tmp)
+
             IF (log_unit > 0) THEN
                WRITE (log_unit, "(1X,A)") "", &
                   "-------------------------------------------------------------------------------", &
@@ -551,8 +469,93 @@ CONTAINS
                   "-                      TDDFPT TRIPLET ENERGIES                                -"
             END IF !log_unit
             tddfpt_control%rks_triplets = .TRUE.
-            IF (mult_tmp) THEN
-               CALL tddfpt_energies(qs_env, nstates, &
+
+            CALL tddfpt_create_work_matrices(work_matrices,&
+                             gs_mos,nstates, do_hfx, do_admm, qs_env,&
+                             sub_env)
+            CALL tddfpt_construct_ground_state_orb_density(&
+                        rho_orb_struct=work_matrices%rho_orb_struct_sub, &
+                        rho_xc_struct=work_matrices%rho_xc_struct_sub, &
+                        is_rks_triplets=(tddfpt_control%rks_triplets), &
+                        qs_env=qs_env, sub_env=sub_env, &
+                        wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub)
+            IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
+                 IF (do_admm) THEN
+                        ! Full kernel with ADMM
+                     IF (tddfpt_control%admm_xc_correction) THEN
+                           CALL create_kernel_env(kernel_env=full_kernel_env, &
+                                rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                                xc_section=admm_env%xc_section_primary, &
+                                is_rks_triplets=(tddfpt_control%rks_triplets),&
+                                sub_env=sub_env)
+                     ELSE
+                           CALL create_kernel_env(kernel_env=full_kernel_env, &
+                                rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                                xc_section=xc_section, &
+                                is_rks_triplets=(tddfpt_control%rks_triplets),&
+                                sub_env=sub_env)
+                     END IF !addmm_xc_correction
+
+                     CALL tddfpt_construct_aux_fit_density(&
+                              rho_orb_struct=work_matrices%rho_orb_struct_sub, &
+                              rho_aux_fit_struct=work_matrices%rho_aux_fit_struct_sub, &
+                              local_rho_set=sub_env%local_rho_set_admm, &
+                              qs_env=qs_env, sub_env=sub_env, &
+                              wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub, &
+                              wfm_rho_aux_fit=work_matrices%rho_ao_aux_fit_fm_sub, &
+                              wfm_aux_orb=work_matrices%wfm_aux_orb_sub)
+
+                     CALL create_kernel_env(kernel_env=kernel_env_admm_aux, &
+                               rho_struct_sub=work_matrices%rho_aux_fit_struct_sub, &
+                               xc_section=admm_env%xc_section_aux, &
+                               is_rks_triplets=(tddfpt_control%rks_triplets),&
+                               sub_env=sub_env)
+                            kernel_env%full_kernel => full_kernel_env
+                            kernel_env%admm_kernel => kernel_env_admm_aux
+                 ELSE
+                     ! Full kernel
+                     CALL create_kernel_env(kernel_env=full_kernel_env, &
+                              rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                              xc_section=xc_section, &
+                              is_rks_triplets=(tddfpt_control%rks_triplets),&
+                              sub_env=sub_env)
+                           kernel_env%full_kernel => full_kernel_env
+                     NULLIFY (kernel_env%admm_kernel)
+                 END IF  !do_admm
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
+                 ! sTDA kernel
+                 nactive = 0
+                 CALL cp_fm_get_info(gs_mos(1)%mos_occ, nrow_global=nao)
+                 DO ispin = 1, SIZE(gs_mos)
+                     CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, &
+                                            ncol_global=nactive(ispin))
+                 END DO ! ispins
+                 CALL allocate_stda_env(qs_env, stda_kernel, nao, nactive)
+                 ! sTDA parameters
+                 CALL stda_init_param(qs_env, stda_kernel, &
+                                         tddfpt_control%stda_control)
+                 ! allocate pools and work matrices
+                 nstates = tddfpt_control%nstates
+                 CALL stda_create_work_matrices(work_matrices, gs_mos, &
+                                                  nstates,  qs_env, sub_env)
+                 !
+                 CALL stda_init_matrices(qs_env, stda_kernel, sub_env, &
+                                            work_matrices, tddfpt_control)
+                    !
+                 kernel_env%stda_kernel => stda_kernel
+                 NULLIFY (kernel_env%full_kernel)
+                 NULLIFY (kernel_env%admm_kernel)
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
+                 ! allocate pools and work matrices
+                 nstates = tddfpt_control%nstates
+                 CALL stda_create_work_matrices(work_matrices, gs_mos, &
+                                                   nstates, qs_env, sub_env)
+                 NULLIFY (kernel_env%full_kernel)
+                 NULLIFY (kernel_env%admm_kernel)
+                 NULLIFY (kernel_env%stda_kernel)
+            END IF !no kernel
+
+            CALL tddfpt_energies(qs_env, nstates, &
                                     nspins, work_matrices, &
                                     tddfpt_control, logger, &
                                     tddfpt_print_section, &
@@ -562,60 +565,178 @@ CONTAINS
                                     kernel_env, matrix_ks, &
                                     sub_env, ostrength_trip, &
                                     dipole_op_mos_occ, 3)
+
+
             ELSE
-               CALL tddfpt_energies(qs_env_tmp, nstates, &
-                                    nspins, work_matrices_tmp, &
-                                    tddfpt_control, logger, & 
+                IF (log_unit > 0) THEN
+                     WRITE (log_unit, "(1X,A)") "", &
+                     "-------------------------------------------------------------------------------", &
+                     "-------------------------------------------------------------------------------", &
+                     "-                      TDDFPT TRIPLET ENERGIES                                -"
+                END IF !log_unit
+
+                CALL tddfpt_energies(qs_env_tmp, nstates, &
+                                    nspins, work_matrices, &
+                                    tddfpt_control, logger, &
                                     tddfpt_print_section, &
                                     evects_trip, evals_trip, &
                                     gs_mos,tddfpt_section, &
                                     S_evects_tmp, matrix_s, &
-                                    kernel_env_tmp, matrix_ks, &
+                                    kernel_env, matrix_ks, &
                                     sub_env, ostrength_trip, &
                                     dipole_op_mos_occ, 3)
-            END IF !mult_tmp
 
-           IF (log_unit > 0) THEN
-                  WRITE (log_unit, "(1X,A)") "", &
-                  "-------------------------------------------------------------------------------", &
-                  "-                         START SOC CALCULATIONS                              -", &
-                  "-------------------------------------------------------------------------------"
-            END IF
-
-            !CPABORT("PART IS SKIPPT DUE TO DEGUB")
-            CALL tddfpt_soc(qs_env,&
-                            evals_sing,&
-                            evals_trip,&
-                            evects_sing,&
-                            evects_trip)!,&
-                            !gs_mos,&
-                            !tddfpt_control)
-
-            tddfpt_control%rks_triplets = mult_tmp
-            
-            !! We need to clean up the tmp structures
+               !! We need to clean up the tmp structures
             IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
-               IF (do_admm) CALL release_kernel_env(kernel_env_tmp%admm_kernel)
+               IF (do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
                IF (tddfpt_control%do_lrigpw) THEN
-                  CALL lri_env_release(kernel_env_tmp%full_kernel%lri_env)
-                  DEALLOCATE (kernel_env_tmp%full_kernel%lri_env)
-                  CALL lri_density_release(kernel_env_tmp%full_kernel%lri_density)
-                  DEALLOCATE (kernel_env_tmp%full_kernel%lri_density)
+                  CALL lri_env_release(kernel_env%full_kernel%lri_env)
+                  DEALLOCATE (kernel_env%full_kernel%lri_env)
+                  CALL lri_density_release(kernel_env%full_kernel%lri_density)
+                  DEALLOCATE (kernel_env%full_kernel%lri_density)
                END IF
-                  CALL release_kernel_env(kernel_env_tmp%full_kernel)
+                  CALL release_kernel_env(kernel_env%full_kernel)
             ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
-               CALL deallocate_stda_env(stda_kernel_tmp)
+               CALL deallocate_stda_env(stda_kernel)
             ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
-                  !
-             ELSE
+               !
+            ELSE
                CPABORT('Unknown kernel type')
             END IF
 
-            CALL tddfpt_release_work_matrices(work_matrices_tmp, sub_env)
+            CALL tddfpt_release_work_matrices(work_matrices, sub_env)
             NULLIFY(qs_env_tmp)
             DEALLOCATE(S_evects_tmp)
-            !CALL qs_env_release(qs_tmp)
+
+
+            IF (log_unit > 0) THEN
+               WRITE (log_unit, "(1X,A)") "", &
+                  "-------------------------------------------------------------------------------", &
+                  "-------------------------------------------------------------------------------", &
+                  "-                      TDDFPT SINGLET ENERGIES                                -"
+            END IF
+
+            tddfpt_control%rks_triplets = .FALSE.
+
+            CALL tddfpt_create_work_matrices(work_matrices,&
+                             gs_mos,nstates, do_hfx, do_admm, qs_env,&
+                             sub_env)
+            CALL tddfpt_construct_ground_state_orb_density(&
+                        rho_orb_struct=work_matrices%rho_orb_struct_sub, &
+                        rho_xc_struct=work_matrices%rho_xc_struct_sub, &
+                        is_rks_triplets=(tddfpt_control%rks_triplets), &
+                        qs_env=qs_env, sub_env=sub_env, &
+                        wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub)
+            IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
+                 IF (do_admm) THEN
+                        ! Full kernel with ADMM
+                     IF (tddfpt_control%admm_xc_correction) THEN
+                           CALL create_kernel_env(kernel_env=full_kernel_env, &
+                                rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                                xc_section=admm_env%xc_section_primary, &
+                                is_rks_triplets=(tddfpt_control%rks_triplets),&
+                                sub_env=sub_env)
+                     ELSE
+                           CALL create_kernel_env(kernel_env=full_kernel_env, &
+                                rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                                xc_section=xc_section, &
+                                is_rks_triplets=(tddfpt_control%rks_triplets),&
+                                sub_env=sub_env)
+                     END IF !addmm_xc_correction
+
+                     CALL tddfpt_construct_aux_fit_density(&
+                              rho_orb_struct=work_matrices%rho_orb_struct_sub, &
+                              rho_aux_fit_struct=work_matrices%rho_aux_fit_struct_sub, &
+                              local_rho_set=sub_env%local_rho_set_admm, &
+                              qs_env=qs_env, sub_env=sub_env, &
+                              wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub, &
+                              wfm_rho_aux_fit=work_matrices%rho_ao_aux_fit_fm_sub, &
+                              wfm_aux_orb=work_matrices%wfm_aux_orb_sub)
+
+                     CALL create_kernel_env(kernel_env=kernel_env_admm_aux, &
+                               rho_struct_sub=work_matrices%rho_aux_fit_struct_sub, &
+                               xc_section=admm_env%xc_section_aux, &
+                               is_rks_triplets=(tddfpt_control%rks_triplets),&
+                               sub_env=sub_env)
+                            kernel_env%full_kernel => full_kernel_env
+                            kernel_env%admm_kernel => kernel_env_admm_aux
+                 ELSE
+                    ! Full kernel
+                     CALL create_kernel_env(kernel_env=full_kernel_env, &
+                              rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                              xc_section=xc_section, &
+                              is_rks_triplets=(tddfpt_control%rks_triplets),&
+                              sub_env=sub_env)
+                           kernel_env%full_kernel => full_kernel_env
+                     NULLIFY (kernel_env%admm_kernel)
+                 END IF  !do_admm
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
+                 ! sTDA kernel
+                 nactive = 0
+                 CALL cp_fm_get_info(gs_mos(1)%mos_occ, nrow_global=nao)
+                 DO ispin = 1, SIZE(gs_mos)
+                     CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, &
+                                            ncol_global=nactive(ispin))
+                 END DO ! ispins
+                 CALL allocate_stda_env(qs_env, stda_kernel, nao, nactive)
+                 ! sTDA parameters
+                 CALL stda_init_param(qs_env, stda_kernel, &
+                                         tddfpt_control%stda_control)
+                 ! allocate pools and work matrices
+                 nstates = tddfpt_control%nstates
+                 CALL stda_create_work_matrices(work_matrices, gs_mos, &
+                                                  nstates,  qs_env, sub_env)
+                 !
+                 CALL stda_init_matrices(qs_env, stda_kernel, sub_env, &
+                                            work_matrices, tddfpt_control)
+                    !
+                 kernel_env%stda_kernel => stda_kernel
+                 NULLIFY (kernel_env%full_kernel)
+                 NULLIFY (kernel_env%admm_kernel)
+            ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
+                 ! allocate pools and work matrices
+                 nstates = tddfpt_control%nstates
+                 CALL stda_create_work_matrices(work_matrices, gs_mos, &
+                                                   nstates, qs_env, sub_env)
+                 NULLIFY (kernel_env%full_kernel)
+                 NULLIFY (kernel_env%admm_kernel)
+                 NULLIFY (kernel_env%stda_kernel)
+            END IF !no kernel
+
+            CALL tddfpt_energies(qs_env, nstates, &
+                                    nspins, work_matrices, &
+                                    tddfpt_control, logger, &
+                                    tddfpt_print_section, &
+                                    evects_sing, evals_sing, &
+                                    gs_mos,tddfpt_section, &
+                                    S_evects, matrix_s, &
+                                    kernel_env, matrix_ks, &
+                                    sub_env, ostrength_sing, &
+                                    dipole_op_mos_occ, 1)
+
+
+         END IF !mult_tmp
+
+         IF (log_unit > 0) THEN
+               WRITE (log_unit, "(1X,A)") "", &
+               "-------------------------------------------------------------------------------", &
+               "-                         START SOC CALCULATIONS                              -", &
+               "-------------------------------------------------------------------------------"
+         END IF
+
+         !CPABORT("PART IS SKIPPT DUE TO DEGUB")
+         CALL tddfpt_soc(qs_env,&
+                         evals_sing,&
+                         evals_trip,&
+                         evects_sing,&
+                         evects_trip)!,&
+                         !gs_mos,&
+                        !tddfpt_control)
+
+         tddfpt_control%rks_triplets = mult_tmp
+            
       ELSE
+         !!Do a normal tddfpt run!
         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
          tddfpt_control, logger, tddfpt_print_section, evects,evals, &
          gs_mos,tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
