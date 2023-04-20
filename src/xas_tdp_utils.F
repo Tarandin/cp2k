@@ -52,7 +52,7 @@ MODULE xas_tdp_utils
         dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
         dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print
+        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print, dbcsr_print_block_sum
    USE input_constants,                 ONLY: ot_precond_full_single,&
                                               tddfpt_singlet,&
                                               tddfpt_spin_cons,&
@@ -1963,7 +1963,7 @@ CONTAINS
                                                             vec_struct, work_struct
       TYPE(cp_fm_type)                                   :: gstp_fm, img_fm, prod_fm, real_fm, &
                                                             tmp_fm, vec_soc_x, vec_soc_y, &
-                                                            vec_soc_z, work_fm
+                                                            vec_soc_z, work_fm, tmp_fm_2
       TYPE(cp_fm_type), POINTER                          :: gs_coeffs, sg_coeffs, tp_coeffs
       TYPE(dbcsr_distribution_type), POINTER             :: coeffs_dist, dbcsr_dist, prod_dist
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
@@ -1972,6 +1972,7 @@ CONTAINS
                                                             dbcsr_tmp, dbcsr_tp, dbcsr_work, &
                                                             orb_soc_x, orb_soc_y, orb_soc_z
       TYPE(mp_para_env_type), POINTER                    :: para_env
+      INTEGER                                            :: output_unit
 
       NULLIFY (sg_coeffs, tp_coeffs, gs_coeffs, sg_evals, tp_evals, full_struct)
       NULLIFY (para_env, blacs_env, prod_struct, vec_struct, orb_soc_y, orb_soc_z)
@@ -2004,7 +2005,7 @@ CONTAINS
       eps_filter = xas_tdp_control%eps_filter
 
      ! !! DEBUG!!
-     ! output_unit = cp_logger_get_default_io_unit()
+      output_unit = cp_logger_get_default_io_unit()
      ! IF (output_unit > 0) THEN
      !    CALL cp_fm_write_formatted(gs_coeffs, output_unit, "DEBUG GS")
      !    CALL cp_fm_write_formatted(sg_coeffs, output_unit, "DEBUG SG")
@@ -2099,6 +2100,7 @@ CONTAINS
                                nrow_global=nex, ncol_global=nex)
       CALL cp_fm_create(work_fm, work_struct)
       CALL cp_fm_create(tmp_fm, work_struct)
+      CALL cp_fm_create(tmp_fm_2, prod_struct)
       ALLOCATE (diag(ndo_mo))
 
 !  Precompute everything we can before looping over excited states
@@ -2178,6 +2180,7 @@ CONTAINS
       DEALLOCATE (gstp_block)
 
       !Now do the singlet-triplet SOC
+
       !start by computing the singlet-triplet overlap
       CALL dbcsr_multiply('N', 'N', 1.0_dp, matrix_s(1)%matrix, dbcsr_tp, 0.0_dp, &
                           dbcsr_work, filter_eps=eps_filter)
@@ -2308,14 +2311,6 @@ CONTAINS
       CALL cp_cfm_create(hami_cfm, full_struct)
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
-     !! DEBUG!!
-     ! output_unit = cp_logger_get_default_io_unit()
-     ! IF (output_unit > 0) THEN
-     !    CALL cp_fm_write_formatted(real_fm, output_unit, "DEBUG real_fm")
-     !    CALL cp_fm_write_formatted(img_fm, output_unit, "DEBUG imag_fm")
-     ! END IF
-
-
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
 
@@ -2331,14 +2326,6 @@ CONTAINS
 !  Compute the dipole oscillator strengths
       CALL compute_soc_dipole_fosc(evecs_cfm, dbcsr_soc_package, donor_state, xas_tdp_env, &
                                    xas_tdp_control, qs_env)
-
-      !! DEBUG
-   !   output_unit = cp_logger_get_default_io_unit()
-   !   IF(output_unit > 0) THEN
-   !      DO itp = 1,SIZE(xas_tdp_env%dipmat)
-   !         CALL dbcsr_print(xas_tdp_env%dipmat(itp)%matrix, unit_nr=output_unit)
-   !      END DO
-   !   END IF
 
   !And the quadrupole (if needed)
       IF (xas_tdp_control%do_quad) THEN
@@ -2686,18 +2673,6 @@ CONTAINS
       ALLOCATE (gsgs_op(dim_op))
       ALLOCATE (gs_diag(homo))
 
-      !!DEBUG
-    !  IF (output_unit > 0) THEN
-    !     write(output_unit,'(I4)') homo
-    !     CALL cp_fm_write_formatted(mo_coeff, output_unit, "DEBUG MO_coeff")
-    !     write(output_unit,'(A)') "Überlappmatix"
-    !     CALL dbcsr_print(matrix_s(1)%matrix, unit_nr=output_unit)
-    !     write(output_unit,'(A)') "dbcsr_sg"
-    !     CALL dbcsr_print(dbcsr_sg, unit_nr=output_unit)
-    !     write(output_unit,'(A)') "dbcsr_tp"
-    !     CALL dbcsr_print(dbcsr_tp, unit_nr=output_unit)
-    !  END IF
-
       DO i = 1, dim_op
 
          ao_op_i => ao_op(i)%matrix
@@ -3018,6 +2993,7 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: dip_struct, full_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: amew_dip
       TYPE(mp_para_env_type), POINTER                    :: para_env
+      INTEGER                                            :: output_unit
 
       NULLIFY (para_env, blacs_env, dip_struct, full_struct, osc_str)
       NULLIFY (soc_evals)
@@ -3025,7 +3001,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       !!DEBUG
-   !output_unit = cp_logger_get_default_io_unit()
+   output_unit = cp_logger_get_default_io_unit()
 
       !init
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
@@ -3048,6 +3024,7 @@ CONTAINS
       CALL cp_cfm_create(work2_cfm, full_struct)
       ALLOCATE (transdip(ntot, 1))
 
+
       !get the dipole in the AMEW basis
       IF (do_os) THEN
          CALL get_os_amew_op(amew_dip, xas_tdp_env%dipmat, gs_coeffs, dbcsr_soc_package, &
@@ -3056,13 +3033,6 @@ CONTAINS
          CALL get_rcs_amew_op(amew_dip, xas_tdp_env%dipmat, dbcsr_soc_package, donor_state, &
                               xas_tdp_control%eps_filter, qs_env)
       END IF
-
-      !!DEBUG
-  ! IF (output_unit > 0) THEN
-  !    DO i = 1, SIZE(amew_dip)
-  !       CALL cp_fm_write_formatted(amew_dip(i), output_unit, "DEBUG::amew_dip")
-  !    END DO
-  ! END IF
 
       DO i = 1, 3 !cartesian coord x, y, z
 

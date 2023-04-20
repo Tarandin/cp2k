@@ -853,10 +853,9 @@ CONTAINS
 !>       and its neighbors at a time. Leads to smaller overlap matrix to invert and less 3-center
 !>       overlap to compute. The procedure is repeated for each excited atom
 ! **************************************************************************************************
-   SUBROUTINE calculate_density_coeffs(xas_atom_env, soc_atom_env, qs_env)
+   SUBROUTINE calculate_density_coeffs(xas_atom_env, qs_env)
 
-      TYPE(xas_atom_env_type), POINTER, OPTIONAL         :: xas_atom_env
-      TYPE(soc_atom_env_type),  POINTER, OPTIONAL        :: soc_atom_env
+      TYPE(xas_atom_env_type), POINTER                   :: xas_atom_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'calculate_density_coeffs'
@@ -909,13 +908,8 @@ CONTAINS
       CALL get_qs_env(qs_env, nkind=nkind, qs_kind_set=qs_kind_set, rho=rho, &
                       natom=natom, particle_set=particle_set, dbcsr_dist=dbcsr_dist, &
                       para_env=para_env, blacs_env=blacs_env)
-      IF(PRESENT(xas_atom_env)) THEN
-         nspins = xas_atom_env%nspins
-         nex = SIZE(xas_atom_env%excited_atoms)
-      ELSE
-         nspins = soc_atom_env%nspins
-         nex = SIZE(soc_atom_env%excited_atoms)
-      END IF
+      nspins = xas_atom_env%nspins
+      nex = SIZE(xas_atom_env%excited_atoms)
       CALL qs_rho_get(rho, rho_ao=rho_ao)
 
 !  Create the needed neighbor list and basis set lists.
@@ -934,13 +928,8 @@ CONTAINS
       CALL release_neighbor_list_sets(sab_ri)
 
 !  Get the neighbors of the excited atoms (= all the atoms where density coeffs are needed)
-      IF(PRESENT(xas_atom_env)) THEN
          CALL find_neighbors(xas_atom_env%excited_atoms, ri_mats, xas_atom_env%ri_radius, &
                              qs_env, all_neighbors=all_ri_atoms, neighbor_set=xas_atom_env%exat_neighbors)
-      ELSE
-         CALL find_neighbors(soc_atom_env%excited_atoms, ri_mats, soc_atom_env%ri_radius, &
-                             qs_env, all_neighbors=all_ri_atoms,neighbor_set=soc_atom_env%exat_neighbors)
-      END IF
 
       !keep in mind that double occupation is included in rho_ao in case of closed-shell
       factor = 0.5_dp; IF (nspins == 2) factor = 1.0_dp
@@ -950,7 +939,6 @@ CONTAINS
 !        => need different sets of RI coeffs
       ALLOCATE (blk_size_ri(natom))
       CALL get_particle_set(particle_set, qs_kind_set, nsgf=blk_size_ri, basis=basis_set_ri)
-      IF(PRESENT(xas_atom_env)) THEN
         ALLOCATE (xas_atom_env%ri_dcoeff(natom, nspins, nex))
         DO iex = 1, nex
             DO ispin = 1, nspins
@@ -963,20 +951,6 @@ CONTAINS
               END DO
            END DO
         END DO
-      ELSE
-         ALLOCATE (soc_atom_env%ri_dcoeff(natom, nspins, nex))
-        DO iex = 1, nex
-            DO ispin = 1, nspins
-               DO iat = 1, natom
-                  NULLIFY (soc_atom_env%ri_dcoeff(iat, ispin, iex)%array)
-                  IF ((.NOT. ANY(soc_atom_env%exat_neighbors(iex)%array == iat)) &
-                      .AND. (.NOT. soc_atom_env%excited_atoms(iex) == iat)) CYCLE
-                  ALLOCATE (soc_atom_env%ri_dcoeff(iat, ispin, iex)%array(blk_size_ri(iat)))
-                  soc_atom_env%ri_dcoeff(iat, ispin, iex)%array = 0.0_dp
-              END DO
-           END DO
-        END DO
-      END IF
 
       output_unit = cp_logger_get_default_io_unit()
       IF (output_unit > 0) THEN
@@ -994,19 +968,11 @@ CONTAINS
       DO iex = 1, nex
 
          !get neighbors of current atom
-         IF (PRESENT(xas_atom_env)) THEN
            exat = xas_atom_env%excited_atoms(iex)
            nnb = 1 + SIZE(xas_atom_env%exat_neighbors(iex)%array)
            ALLOCATE (neighbors(nnb))
            neighbors(1) = exat
            neighbors(2:nnb) = xas_atom_env%exat_neighbors(iex)%array(:)
-         ELSE
-           exat = soc_atom_env%excited_atoms(iex)
-           nnb = 1 + SIZE(soc_atom_env%exat_neighbors(iex)%array)
-           ALLOCATE (neighbors(nnb))
-           neighbors(1) = exat
-           neighbors(2:nnb) = soc_atom_env%exat_neighbors(iex)%array(:)
-         END IF
          CALL sort_unique(neighbors, unique)
 
          !link the atoms to their position in neighbors
@@ -1016,19 +982,11 @@ CONTAINS
             idx_to_nb(neighbors(inb)) = inb
          END DO
 
-         !   IF (output_unit > 0) THEN
-         !      WRITE (output_unit, FMT="(T7,I12,I21)") &
-         !         exat, nnb
-         !   END IF
-
          !Get the neighbor lists for the overlap integrals (abc), centers c on the current
          !excited atom and its neighbors defined by RI_RADIUS
          CALL build_xas_tdp_ovlp_nl(ab_list, basis_set_ri, basis_set_ri, qs_env)
          CALL build_xas_tdp_3c_nl(ac_list, basis_set_orb, basis_set_ri, do_potential_id, &
                                   qs_env, excited_atoms=neighbors)
-
-         IF (ASSOCIATED(ab_list)) CPWARN("ab_list is not associated")
-         IF (ASSOCIATED(ac_list)) CPWARN("ac_list is not associated")
 
          !Compute the 3-center overlap integrals
          pot%potential_type = do_potential_id
@@ -1045,7 +1003,7 @@ CONTAINS
          !Do the actual contraction: coeff_y = sum_pq sum_x P_pq (phi_p phi_q xi_x) S_xy^-1
 
 !$OMP PARALLEL DEFAULT(NONE) &
-!$OMP SHARED(pqX,rho_ao,ri_sinv,xas_atom_env, soc_atom_env)&
+!$OMP SHARED(pqX,rho_ao,ri_sinv,xas_atom_env)&
 !$OMP SHARED(blk_size_ri,idx_to_nb,nspins,nnb,neighbors,iex,factor) &
 !$OMP PRIVATE(iter,ind,t_block,tensor_found,iatom,jatom,katom,inb,prefac,ispin) &
 !$OMP PRIVATE(pmat_block,pmat_found,pmat_blockt,pmat_foundt,work1,work2,jnb,ri_at) &
@@ -1096,11 +1054,7 @@ CONTAINS
                   IF ((.NOT. sinv_found) .AND. (.NOT. sinv_foundt)) CYCLE
 
                   !second contraction with the inverse RI overlap
-                  IF(PRESENT(xas_atom_env)) THEN
                      ALLOCATE (work2(SIZE(xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array)))
-                  ELSE
-                     ALLOCATE (work2(SIZE(soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array)))
-                  END IF
 
                   work2 = 0.0_dp
 
@@ -1114,15 +1068,9 @@ CONTAINS
                      END DO
                   END IF
                   DO i = 1, SIZE(work2)
-                     IF(PRESENT(xas_atom_env)) THEN
 !$OMP ATOMIC
                         xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) = &
                         xas_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) + work2(i)
-                     ELSE
-!$OMP ATOMIC
-                        soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) = &
-                        soc_atom_env%ri_dcoeff(ri_at, ispin, iex)%array(i) + work2(i)
-                     END IF
                   END DO
 
                   DEALLOCATE (work2)
@@ -1146,7 +1094,6 @@ CONTAINS
       END DO !iex
 
       !making sure all procs have the same info
-      IF(PRESENT(xas_atom_env)) THEN
          DO iex = 1, nex
             DO ispin = 1, nspins
                DO iat = 1, natom
@@ -1156,17 +1103,6 @@ CONTAINS
                END DO !iat
             END DO !ispin
          END DO !iex
-      ELSE
-         DO iex = 1, nex
-            DO ispin = 1, nspins
-               DO iat = 1, natom
-                  IF ((.NOT. ANY(soc_atom_env%exat_neighbors(iex)%array == iat)) &
-                      .AND. (.NOT. soc_atom_env%excited_atoms(iex) == iat)) CYCLE
-                  CALL para_env%group%sum(soc_atom_env%ri_dcoeff(iat, ispin, iex)%array)
-               END DO !iat
-            END DO !ispin
-         END DO !iex
-      END IF
 
 !  clean-up
       CALL dbcsr_deallocate_matrix_set(overlap)
@@ -3509,6 +3445,7 @@ CONTAINS
          ikind = particle_set(iat)%atomic_kind%kind_number
 
          DO i = 1, 3
+            !!! iat iat !!! DEBUG
             CALL dbcsr_put_block(matrix_soc(i)%matrix, iat, iat, int_soc(ikind)%array(:, :, i))
          END DO
 

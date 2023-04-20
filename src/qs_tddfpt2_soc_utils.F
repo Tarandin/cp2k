@@ -65,7 +65,7 @@ MODULE qs_tddfpt2_soc_utils
    USE kinds,                           ONLY: dp
    USE mathlib,                         ONLY: get_diag
    USE parallel_gemm_api,               ONLY: parallel_gemm
-   USE physcon,                         ONLY: a_fine
+   USE physcon,                         ONLY: a_fine, wavenumbers
    USE preconditioner_types,            ONLY: destroy_preconditioner,&
                                               init_preconditioner,&
                                               preconditioner_type
@@ -80,6 +80,10 @@ MODULE qs_tddfpt2_soc_utils
    USE xas_tdp_types,                   ONLY: donor_state_type,&
                                               xas_tdp_control_type,&
                                               xas_tdp_env_type
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
+                                                     cp_logger_get_default_unit_nr,&
+                                              cp_logger_type
 
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num
 #include "./base/base_uses.f90"
@@ -119,27 +123,30 @@ CONTAINS
 !>       soc_ij = pref_overall*(SUM(diag(lr_soc_ij)) + pref_trace*SUM(lr_overlap_ij*TRANSPOSE(domo_soc)))
 !>       optionally, the value pref_diags*SUM(diag(lr_overlap_ij)) can be added (before pref_overall)
 ! **************************************************************************************************
-   SUBROUTINE rcs_amew_soc_elements(amew_soc, lr_soc, lr_overlap, domo_soc, pref_trace, &
+   SUBROUTINE rcs_amew_soc_elements(amew_soc, lr_soc, lr_overlap, mo_soc, pref_trace, &
                                     pref_overall, pref_diags, symmetric)
 
       TYPE(dbcsr_type)                                   :: amew_soc, lr_soc, lr_overlap
-      REAL(dp), DIMENSION(:, :)                          :: domo_soc
+      REAL(dp), DIMENSION(:, :)                          :: mo_soc
       REAL(dp)                                           :: pref_trace, pref_overall
       REAL(dp), OPTIONAL                                 :: pref_diags
       LOGICAL, OPTIONAL                                  :: symmetric
-
       INTEGER                                            :: blk, iex, jex
       LOGICAL                                            :: do_diags, found, my_symm
       REAL(dp)                                           :: soc_elem
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: diag
       REAL(dp), DIMENSION(:, :), POINTER                 :: pblock
       TYPE(dbcsr_iterator_type)                          :: iter
+             
 
-      ALLOCATE (diag(SIZE(domo_soc, 1)))
+      ALLOCATE (diag(SIZE(mo_soc, 1)))
       my_symm = .FALSE.
+      
       IF (PRESENT(symmetric)) my_symm = symmetric
       do_diags = .FALSE.
       IF (PRESENT(pref_diags)) do_diags = .TRUE.
+      my_symm = .FALSE.
+
 
       CALL dbcsr_set(amew_soc, 0.0_dp)
       !loop over the excited states pairs as the block of amew_soc (which are all reserved)
@@ -160,17 +167,17 @@ CONTAINS
 
          CALL dbcsr_get_block_p(lr_overlap, iex, jex, pblock, found)
          IF (found) THEN
-            soc_elem = soc_elem + pref_trace*SUM(pblock*TRANSPOSE(domo_soc))
+            soc_elem = soc_elem + pref_trace*SUM(pblock*TRANSPOSE(mo_soc))
 
-            IF (do_diags) THEN
-               diag(:) = get_diag(pblock)
-               soc_elem = soc_elem + pref_diags*SUM(diag)
-            END IF
+
+          IF (do_diags) THEN
+             diag(:) = get_diag(pblock)
+             soc_elem = soc_elem + pref_diags*SUM(diag)
+          END IF
          END IF
 
          CALL dbcsr_get_block_p(amew_soc, iex, jex, pblock, found)
          pblock = pref_overall*soc_elem
-
       END DO
       CALL dbcsr_iterator_stop(iter)
 

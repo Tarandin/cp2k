@@ -64,20 +64,16 @@ MODULE qs_tddfpt2_soc_types
 ! \param
 !*************************************************************************************************
       TYPE soc_env_type
-         TYPE(cp_fm_type), POINTER                       :: gs_coeff 
          !! a :: singlett or spin-conservm b :: triplett or spin flip
-         TYPE(cp_fm_type)                                :: a_coeff, &
-                                                            b_coeff
          TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: orb_soc
-         TYPE(cp_para_env_type), POINTER                 :: para_env
-         TYPE(cp_blacs_env_type), POINTER                :: blacs_env
-         TYPE(mo_set_type), Dimension(:), POINTER        :: mos
          TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: dipmat
-         INTEGER                                         :: nmo, nao
-         REAL(dp), ALLOCATABLE, DIMENSION(:)             :: soc_evals, &
-                                                            soc_osc
          REAL(dp), POINTER, DIMENSION(:)                 :: evals_a, &
                                                             evals_b
+
+         TYPE(cp_fm_type)                                :: a_coeff, &
+                                                            b_coeff
+         REAL(dp), ALLOCATABLE, DIMENSION(:)             :: soc_evals, &
+                                                            soc_osc
          INTEGER, DIMENSION(:), ALLOCATABLE              :: all_atoms,&
                                                             all_kinds
       END TYPE
@@ -95,44 +91,29 @@ MODULE qs_tddfpt2_soc_types
          TYPE(grid_atom_p_type), DIMENSION(:), POINTER     :: grid_atom_set
          TYPE(harmonics_atom_p_type), DIMENSION(:), &
          POINTER                                           :: harmonics_atom_set
-         REAL(dp)                                          :: ri_radius
          INTEGER, DIMENSION(:), POINTER                    :: excited_atoms
          INTEGER, DIMENSION(:), POINTER                    :: excited_kinds
          INTEGER, DIMENSION(:), POINTER                    :: proc_of_exat
          TYPE(cp_2d_r_p_type), DIMENSION(:), POINTER       :: orb_sphi_so
-         TYPE(cp_2d_r_p_type), DIMENSION(:), POINTER       :: ri_sphi_so
-         TYPE(cp_1d_r_p_type), DIMENSION(:, :, :), POINTER :: ri_dcoeff
-         TYPE(cp_1d_i_p_type), DIMENSION(:), POINTER       :: exat_neighbors
       TYPE(cp_2d_r_p_type), DIMENSION(:), POINTER          :: ga, gr, dgr1, dgr2
       TYPE(cp_3d_r_p_type), DIMENSION(:), POINTER          :: dga1, dga2
       END TYPE
-
-
 
 CONTAINS
 
       SUBROUTINE soc_env_create(soc_env)
          TYPE(soc_env_type), TARGET                      :: soc_env
 
-         !ALLOCATE (soc_env)
-
          NULLIFY (soc_env%orb_soc)
-         NULLIFY (soc_env%para_env)
-         NULLIFY (soc_env%blacs_env)
-         NULLIFY (soc_env%mos)
          NULLIFY (soc_env%dipmat)
-         NULLIFY (soc_env%gs_coeff)
          NULLIFY (soc_env%evals_a)
          NULLIFY (soc_env%evals_b)
-
-         soc_env%nmo = -1
-         soc_env%nao = -1
 
       END SUBROUTINE soc_env_create
 
       SUBROUTINE soc_env_release(soc_env)
          TYPE(soc_env_type), TARGET                     :: soc_env
-         INTEGER                                         :: i
+         INTEGER                                        :: i
 
          IF (ASSOCIATED(soc_env%orb_soc)) THEN
             DO i = 1, SIZE(soc_env%orb_soc)
@@ -142,22 +123,15 @@ CONTAINS
             DEALLOCATE (soc_env%orb_soc)
          END IF
 
+         CALL cp_fm_release(soc_env%a_coeff)
+         CALL cp_fm_release(soc_env%b_coeff)
          IF (ALLOCATED(soc_env%all_atoms)) DEALLOCATE(soc_env%all_atoms)
          IF (ALLOCATED(soc_env%all_kinds)) DEALLOCATE(soc_env%all_kinds)
-         IF (ASSOCIATED(soc_env%blacs_env)) NULLIFY(soc_env%blacs_env)
-         IF (ASSOCIATED(soc_env%para_env)) NULLIFY(soc_env%para_env)
-         IF (ASSOCIATED(soc_env%mos)) NULLIFY(soc_env%mos)
-         IF (ASSOCIATED(soc_env%gs_coeff)) NULLIFY(soc_env%gs_coeff)
          IF (ASSOCIATED(soc_env%evals_a)) NULLIFY(soc_env%evals_a)
          IF (ASSOCIATED(soc_env%evals_b)) NULLIFY(soc_env%evals_b)
          IF (ASSOCIATED(soc_env%dipmat)) NULLIFY(soc_env%dipmat)
-         CALL cp_fm_release(soc_env%a_coeff)
-         CALL cp_fm_release(soc_env%b_coeff)
          IF (ALLOCATED(soc_env%soc_evals)) DEALLOCATE(soc_env%soc_evals)
-         IF (ALLOCATED(soc_env%soc_osc))  DEALLOCATE(soc_env%soc_osc)
-
-         !DEALLOCATE(soc_env)
-         
+         IF (ALLOCATED(soc_env%soc_osc))  DEALLOCATE(soc_env%soc_osc) 
 
       END SUBROUTINE soc_env_release
 
@@ -171,16 +145,13 @@ CONTAINS
          ALLOCATE(soc_atom_env)
 
          soc_atom_env%nspins = 1
-         soc_atom_env%ri_radius = 0.0_dp
          NULLIFY(soc_atom_env%grid_atom_set)
          NULLIFY(soc_atom_env%harmonics_atom_set)
          NULLIFY(soc_atom_env%qs_kind_set)
          NULLIFY(soc_atom_env%orb_sphi_so)
-         NULLIFY(soc_atom_env%ri_sphi_so)
 
          NULLIFY (soc_atom_env%excited_atoms)
          NULLIFY (soc_atom_env%excited_kinds)
-         NULLIFY (soc_atom_env%ri_dcoeff)
          NULLIFY (soc_atom_env%gr)
          NULLIFY (soc_atom_env%ga)
          NULLIFY (soc_atom_env%dgr1)
@@ -191,7 +162,7 @@ CONTAINS
 
       SUBROUTINE soc_atom_release(soc_atom_env)
          TYPE(soc_atom_env_type), POINTER                 :: soc_atom_env
-         INTEGER                                          :: i, j, k
+         INTEGER                                          :: i
 
          IF (ASSOCIATED(soc_atom_env%grid_atom_set)) THEN
             DO i = 1, SIZE(soc_atom_env%grid_atom_set)
@@ -210,28 +181,6 @@ CONTAINS
             END DO
             DEALLOCATE (soc_atom_env%harmonics_atom_set)
          END IF
-
-         IF (ASSOCIATED(soc_atom_env%ri_dcoeff)) THEN
-            DO i = 1, SIZE(soc_atom_env%ri_dcoeff, 1)
-               DO j = 1, SIZE(soc_atom_env%ri_dcoeff, 2)
-                  DO k = 1, SIZE(soc_atom_env%ri_dcoeff, 3)
-                     IF (ASSOCIATED(soc_atom_env%ri_dcoeff(i, j, k)%array)) THEN
-                        DEALLOCATE (soc_atom_env%ri_dcoeff(i, j, k)%array)
-                     END IF
-                  END DO
-               END DO
-            END DO
-            DEALLOCATE (soc_atom_env%ri_dcoeff)
-         END IF
-
-       !  IF (ASSOCIATED(soc_atom_env%exat_neighbors)) THEN
-       !     DO i = 1, SIZE(soc_atom_env%exat_neighbors)
-       !        IF (ASSOCIATED(soc_atom_env%exat_neighbors(i)%array)) THEN
-       !           DEALLOCATE (soc_atom_env%exat_neighbors(i)%array)
-       !        END IF
-       !     END DO
-       !     DEALLOCATE (soc_atom_env%exat_neighbors)
-       !  END IF
 
          IF (ASSOCIATED(soc_atom_env%gr)) THEN
             DO i = 1, SIZE(soc_atom_env%gr)
@@ -288,9 +237,6 @@ CONTAINS
          END IF
 
          IF (ASSOCIATED(soc_atom_env%qs_kind_set)) THEN
-            !DO i = 1,SIZE(soc_atom_env%qs_kind_set)
-            !      NULLIFY(soc_atom_env%qs_kind_set(i))
-            !END DO
             NULLIFY(soc_atom_env%qs_kind_set)
          END IF
          IF (ASSOCIATED(soc_atom_env%orb_sphi_so)) THEN
@@ -300,15 +246,6 @@ CONTAINS
                END IF
             END DO
             DEALLOCATE (soc_atom_env%orb_sphi_so)
-         END IF
-
-         IF (ASSOCIATED(soc_atom_env%ri_sphi_so)) THEN
-            DO i = 1, SIZE(soc_atom_env%ri_sphi_so)
-               IF (ASSOCIATED(soc_atom_env%ri_sphi_so(i)%array)) THEN
-                  DEALLOCATE (soc_atom_env%ri_sphi_so(i)%array)
-               END IF
-            END DO
-            DEALLOCATE (soc_atom_env%ri_sphi_so)
          END IF
 
          !Clean-up libint
