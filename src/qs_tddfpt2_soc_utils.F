@@ -181,6 +181,8 @@ CONTAINS
       END DO
       CALL dbcsr_iterator_stop(iter)
 
+      CALL dbcsr_iterator_stop(iter)
+
    END SUBROUTINE rcs_amew_soc_elements
 END MODULE qs_tddfpt2_soc_utils
 

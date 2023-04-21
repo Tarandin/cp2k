@@ -5,7 +5,6 @@
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
 MODULE qs_tddfpt2_soc
-   USE admm_types,                      ONLY: admm_type
    USE bibliography,                    ONLY: Grimme2013,&
                                               Grimme2016,&
                                               Iannuzzi2005,&
@@ -14,21 +13,14 @@ MODULE qs_tddfpt2_soc
    USE basis_set_types,                 ONLY: get_gto_basis_set,&
                                               gto_basis_set_p_type,&
                                               gto_basis_set_type
-   USE cp_array_utils,                  ONLY: cp_1d_i_p_type,&
-                                              cp_1d_r_p_type,&
-                                              cp_2d_i_p_type,&
-                                              cp_2d_r_p_type,&
-                                              cp_3d_r_p_type
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_cfm_diag,                     ONLY: cp_cfm_heevd
    USE cp_cfm_types,                    ONLY: cp_cfm_create,&
                                               cp_cfm_get_info,&
                                               cp_cfm_get_submatrix,&
-                                              cp_cfm_to_cfm,&
                                               cp_cfm_release,&
                                               cp_cfm_type,&
-                                              cp_fm_to_cfm,&
-                                              cp_cfm_to_fm
+                                              cp_fm_to_cfm
    USE cp_control_types,                ONLY: dft_control_type,&
                                               qs_control_type,&
                                               tddfpt2_control_type
@@ -74,6 +66,7 @@ MODULE qs_tddfpt2_soc
                                               dbcsr_get_block_p,&
                                               dbcsr_set, &
                                               dbcsr_print, &
+                                              dbcsr_scale,&
                                               dbcsr_release, &
                                               dbcsr_iterator_start, &
                                               dbcsr_iterator_stop, &
@@ -87,14 +80,9 @@ MODULE qs_tddfpt2_soc
                                               dbcsr_type_no_symmetry,&
                                               dbcsr_reserve_all_blocks,&
                                               dbcsr_get_info
-   USE exstates_types,                  ONLY: excited_energy_type
    USE header,                          ONLY: tddfpt_header, &
                                               tddfpt_soc_header
-   USE hfx_types,                       ONLY: compare_hfx_sections
    USE input_constants,                 ONLY: tddfpt_dipole_velocity,&
-                                              tddfpt_kernel_full,&
-                                              tddfpt_kernel_none,&
-                                              tddfpt_kernel_stda,&
                                               tddfpt_soc_dipol_len,&
                                               tddfpt_soc_dipol_vel
    USE input_section_types,             ONLY: section_vals_get,&
@@ -103,12 +91,7 @@ MODULE qs_tddfpt2_soc
                                               section_vals_val_get
    USE kinds,                           ONLY: dp,&
                                               default_string_length
-   USE lri_environment_methods,         ONLY: lri_print_stat
-   USE lri_environment_types,           ONLY: lri_density_release,&
-                                              lri_env_release
-   USE machine,                         ONLY: m_flush
    USE mathlib,                         ONLY: get_diag
-   USE mulliken,                        ONLY: compute_charges
    USE orbital_pointers,                ONLY: indco,&
                                               indso,&
                                               nco,&
@@ -117,7 +100,6 @@ MODULE qs_tddfpt2_soc
                                               nsoset
    USE physcon,                         ONLY: evolt, wavenumbers
    USE parallel_gemm_api,               ONLY: parallel_gemm
-   USE qs_2nd_kernel_ao,                ONLY: build_dm_response
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
    USE qs_kind_types,                   ONLY: get_qs_kind,&
@@ -126,49 +108,11 @@ MODULE qs_tddfpt2_soc
 
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
-   USE qs_kernel_methods,               ONLY: create_kernel_env
-   USE qs_kernel_types,                 ONLY: full_kernel_env_type,&
-                                              kernel_env_type,&
-                                              release_kernel_env
    USE qs_mo_types,                     ONLY: get_mo_set,&
                                               mo_set_type
    USE qs_operators_ao,                 ONLY: p_xyz_ao,&
                                               rRc_xyz_ao
-   USE qs_scf_methods,                  ONLY: eigensolver
-   USE qs_scf_types,                    ONLY: qs_scf_env_type
-   USE qs_tddfpt2_densities,            ONLY: tddfpt_construct_aux_fit_density,&
-                                              tddfpt_construct_ground_state_orb_density
-   USE qs_tddfpt2_eigensolver,          ONLY: tddfpt_davidson_solver,&
-                                              tddfpt_orthogonalize_psi1_psi0,&
-                                              tddfpt_orthonormalize_psi1_psi1
-   USE qs_tddfpt2_lri_utils,            ONLY: tddfpt2_lri_init
-   USE qs_tddfpt2_properties,           ONLY: tddfpt_dipole_operator,&
-                                              tddfpt_print_excitation_analysis,&
-                                              tddfpt_print_nto_analysis,&
-                                              tddfpt_print_summary
-   USE qs_tddfpt2_restart,              ONLY: tddfpt_read_restart,&
-                                              tddfpt_write_newtonx_output,&
-                                              tddfpt_write_restart
-   USE qs_tddfpt2_stda_types,           ONLY: allocate_stda_env,&
-                                              deallocate_stda_env,&
-                                              stda_env_type,&
-                                              stda_init_param
-   USE qs_tddfpt2_stda_utils,           ONLY: stda_init_matrices
-   USE qs_tddfpt2_subgroups,            ONLY: tddfpt_sub_env_init,&
-                                              tddfpt_sub_env_release,&
-                                              tddfpt_subgroup_env_type
-   USE qs_tddfpt2_types,                ONLY: stda_create_work_matrices,&
-                                              tddfpt_create_work_matrices,&
-                                              tddfpt_ground_state_mos,&
-                                              tddfpt_release_work_matrices,&
-                                              tddfpt_work_matrices
-   USE qs_tddfpt2_utils,                ONLY: tddfpt_guess_vectors,&
-                                              tddfpt_init_mos,&
-                                              tddfpt_oecorr,&
-                                              tddfpt_release_ground_state_mos
    USE string_utilities,                ONLY: integer_to_string
-   USE xc_write_output,                 ONLY: xc_write
-!!Under construction!!
    USE qs_tddfpt2_soc_types,            ONLY: soc_atom_env_type, &
                                               soc_atom_create, &
                                               soc_atom_release, &
@@ -179,7 +123,7 @@ MODULE qs_tddfpt2_soc
                                              calculate_density_coeffs,&
                                              compute_sphi_so, &
                                              truncate_radial_grid
-   USE qs_tddfpt2_soc_utils,            ONLY: rcs_amew_soc_elements
+   USE qs_tddfpt2_soc_utils,           ONLY: rcs_amew_soc_elements
    USE lebedev,                        ONLY: deallocate_lebedev_grids,&
                                              get_number_of_lebedev_grid,&
                                              init_lebedev_grids,&
@@ -197,9 +141,6 @@ MODULE qs_tddfpt2_soc
                                              clebsch_gordon_deallocate,&
                                              clebsch_gordon_init
    USE memory_utilities,               ONLY: reallocate
-   USE string_utilities,                ONLY: integer_to_string
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_get
-  USE qs_tddfpt2_restart,                ONLY: tddfpt_check_orthonormality 
 
 
 
@@ -211,7 +152,7 @@ MODULE qs_tddfpt2_soc
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt2_soc'
 
-   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .FALSE.
+   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
 
    INTEGER, PARAMETER, PRIVATE          :: nderivs = 3
    INTEGER, PARAMETER, PRIVATE          :: maxspins = 2
@@ -321,11 +262,11 @@ CONTAINS
                                                    nprows,&
                                                    dipol_form       
       TYPE(cp_blacs_env_type), POINTER          :: blacs_env
+      TYPE(cp_logger_type), POINTER             :: logger
       TYPE(cp_para_env_type), POINTER           :: para_env
       TYPE(cp_fm_type)                          :: real_fm,& 
                                                    img_fm
       TYPE(cp_fm_struct_type), POINTER          :: full_struct 
-      TYPE(cp_logger_type), POINTER             :: logger
       TYPE(section_vals_type), POINTER          :: tddfpt_print_section
       INTEGER                                   :: nactive, nao
       INTEGER, DIMENSION(:), POINTER            :: row_dist,&
@@ -341,7 +282,6 @@ CONTAINS
                                                    tp_coeffs 
       TYPE(cp_fm_type)                          :: prod_fm, &
                                                    tmp_fm, &
-                                                   dummy, &
                                                    work_fm, &
                                                    gstp_fm, &
                                                    vec_soc_x, &
@@ -364,7 +304,8 @@ CONTAINS
                                                    dbcsr_sg, &
                                                    dbcsr_tmp, & 
                                                    dbcsr_tp, &
-                                                   dbcsr_work
+                                                   dbcsr_work,&
+                                                   dbcsr_dummy
       TYPE(dbcsr_type), POINTER                 :: orb_soc_x, & 
                                                    orb_soc_y, &
                                                    orb_soc_z
@@ -391,6 +332,7 @@ CONTAINS
        NULLIFY (col_dist, col_blk_size, row_blk_size, matrix_s)
        NULLIFY (gstp_struct, tddfpt_print_section, soc_section)
 
+      logger => cp_get_default_logger()
       tddfpt_print_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%PRINT")
       soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
 
@@ -416,6 +358,8 @@ CONTAINS
 
       !! Point at H^SOC and MOs for better readablity of the code
       tp_coeffs => soc_env%b_coeff
+      soc_env%evals_a => evals_sing
+      soc_env%evals_b => evals_trip
       orb_soc_x => soc_env%orb_soc(1)%matrix
       orb_soc_y => soc_env%orb_soc(2)%matrix
       orb_soc_z => soc_env%orb_soc(3)%matrix
@@ -510,7 +454,6 @@ CONTAINS
                                nrow_global=nex,ncol_global=nex)
       CALL cp_fm_create(work_fm, work_struct)
       CALL cp_fm_create(tmp_fm, work_struct)
-      CALL cp_fm_create(dummy, work_struct)
 
 
 !! Begin with the precomputation 
@@ -584,6 +527,11 @@ CONTAINS
          CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst) 
       END DO
 
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(A,2F18.6)") "<0|H_x|T^-1> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
+         WRITE(log_unit,"(A,2F18.6)") "<0|H_x|T^+1> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
+      ENDIF
+
       !gs-triplet with Ms=+-1, real part
       ! <T+-1|H_y|GS>
       CALL parallel_gemm('T', 'N', nactive*ntp,&
@@ -601,6 +549,11 @@ CONTAINS
          ! <0|H_y|T^+1>
          CALL cp_fm_set_element(real_fm, 1, 1 + nsg + 2*ntp + itp, -1.0_dp*soc_gst) 
       END DO
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(A,2F18.6)") "<0|H_y|T^-1> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
+         WRITE(log_unit,"(A,2F18.6)") "<0|H_y|T^+1> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
+      ENDIF
 
       !gs-triplet with Ms=0, purely imaginary
       !< T0|H_z|GS>
@@ -620,6 +573,10 @@ CONTAINS
          soc_gst = sqrt2*SUM(diag)
          CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
       END DO
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(A,2F18.6)") "<0|H_z|T> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
+      ENDIF
+
 
       !! After all:: 
       !! T-1 :: -<0|H_x|T^-1> - <0|H_y|T^-1> at 1+nsg+itp
@@ -683,13 +640,15 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 1)
-
-      CALL cp_fm_set_all(dummy,0.0_dp)
-      CALL cp_fm_to_fm(tmp_fm,dummy)
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
 
       !<S|H_x|T^+1> takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
-      CALL cp_fm_scale(-1.0_dp,dummy)
       CALL cp_fm_to_fm_submat(msource=tmp_fm,&
                               mtarget=img_fm,&
                               nrow=nex,&
@@ -698,7 +657,14 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 2*ntp + 1)
-       CALL cp_fm_scale_and_add(1.0_dp, dummy, 1.0_dp, tmp_fm)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
+
 
 !      !singlet-triplet with Ms=+-1, real part
        !! Precompute <S|H_y|T>
@@ -730,6 +696,13 @@ CONTAINS
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 1)
 
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_tmp, unit_nr=log_unit)
+      ENDIF
+
       !<S|H_y|T^+1>
       CALL cp_fm_to_fm_submat(msource=tmp_fm,&
                               mtarget=real_fm,&
@@ -739,6 +712,13 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 2*ntp + 1)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
 
       !singlet-triplet with Ms=0, purely imaginary
       CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -767,6 +747,13 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + ntp + 1)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<S|H_x|T^0> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
 
       !Now the triplet-triplet SOC
       !start by computing the overlap
@@ -808,6 +795,13 @@ CONTAINS
                               t_firstrow=1 + nsg + ntp + 1, &
                               t_firstcol=1 + nsg + 2*ntp + 1)
 
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
+
       !<T^-1|H_x|T^0>, takes a minus sign and a transpose (because computed <T^0|H_x|T^-1>)
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
@@ -819,6 +813,13 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=1 + nsg + 1, &
                               t_firstcol=1 + nsg + ntp + 1)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^0> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
 
       !Ms=0 to Ms=+-1 SOC, real part
       CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -847,6 +848,13 @@ CONTAINS
                               s_firstcol=1, t_firstrow=1 + nsg + ntp + 1, &
                               t_firstcol=1 + nsg + 2*ntp + 1)
 
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
+
       !<T^-1|H_y|T^0>, takes a minus sign and a transpose
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
@@ -857,6 +865,13 @@ CONTAINS
                               s_firstrow=1,&
                               s_firstcol=1, t_firstrow=1 + nsg + 1, &
                               t_firstcol=1 + nsg + ntp + 1)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
 
       !Ms=1 to Ms=1 and Ms=-1 to Ms=-1 SOC, purely imaginary
       CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -886,6 +901,13 @@ CONTAINS
                               t_firstrow=1 + nsg + 2*ntp + 1, &
                               t_firstcol=1 + nsg + 2*ntp + 1)
 
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^+1|H_x|T^+1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      ENDIF
+
       !<T^-1|H_z|T^-1>, takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
       CALL cp_fm_to_fm_submat(msource=tmp_fm,&
@@ -896,6 +918,13 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=1 + nsg + 1, &
                               t_firstcol=1 + nsg + 1)
+
+      IF (debug_this_module.AND.(log_unit>0)) THEN
+         WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^-1> in Hartree / cm^-1"
+         CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
+         CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
+         CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
+      END IF
 
 !  Intermediate clean-up
       CALL cp_fm_struct_release(work_struct)
@@ -908,16 +937,33 @@ CONTAINS
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
       !!DEBUG or Output?
+      IF (logger%para_env%ionode) THEN
+         log_unit = cp_print_key_unit_nr(logger,& 
+                                         tddfpt_print_section,&
+                                         "SOC_PRINT", &
+                                         extension=".socme", &
+                                         file_form="FORMATTED", &
+                                         file_action="WRITE", &
+                                         file_status="UNKNOWN")
+      ELSE 
+         log_unit = -1
+      END IF
+
       IF (log_unit > 0) THEN
-         WRITE(log_unit,'(A)') "FULL SOC-Matrix"
-         WRITE(log_unit,'(A)')  "STATE  STATE   REAL-PART[eV]  IMG-PART[eV]"
+         WRITE(log_unit,'(A)')  "____________________________________________________"
+         WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
+         WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
+         WRITE(log_unit,'(A)')  "____________________________________________________"
          DO jj = 1,SIZE(real_fm%local_data,2)
             DO ii = 1,SIZE(real_fm%local_data,1)
-               WRITE(unit=log_unit, fmt="(I3,2X,I3,2X,f16.8,2X,f16.8)")ii,jj,&
+               WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
                   real_fm%local_data(ii,jj)*evolt,&
                   img_fm%local_data(ii,jj)*evolt
             END DO
          END DO
+         WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
+         WRITE(log_unit,'(A)')  "____________________________________________________"
+         WRITE(log_unit,'(A)')  "____________________________________________________"
       END IF
       !!END DEBUG
 
@@ -940,7 +986,13 @@ CONTAINS
                      evecs_cfm, eps_filter, dipol_form)
 
 !   Create final output
-    IF (log_unit > 0) THEN
+      IF (logger%para_env%ionode) THEN
+         log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         log_unit = -1
+      END IF
+
+      IF (log_unit > 0) THEN
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
          DO istate = 1, SIZE(soc_env%soc_evals)
             WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate), soc_env%soc_osc(istate)
@@ -1020,6 +1072,7 @@ CONTAINS
                  a_coeff, b_coeff, grid_info)
 
          do_os = .FALSE.
+         !IF (SIZE(evects_a,1) > 1) do_os=.TRUE.
 
          CALL soc_env_create(soc_env)
          CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set,& 
@@ -1133,10 +1186,9 @@ CONTAINS
          TYPE(qs_environment_type)                        :: qs_env
          CHARACTER(len=default_string_length), &
             DIMENSION(:,:), POINTER                       :: grid_info
-
+         TYPE(gto_basis_set_type), POINTER                :: tmp_basis
          TYPE(dft_control_type), POINTER                  :: dft_control
          TYPE(grid_atom_type), POINTER                    :: grid_atom
-         TYPE(gto_basis_set_type), POINTER                :: tmp_basis
          TYPE(harmonics_atom_type), POINTER               :: harmonics
          TYPE(qs_control_type), POINTER                   :: qs_control
          TYPE(qs_kind_type), DIMENSION(:), POINTER        :: qs_kind_set
@@ -1178,7 +1230,7 @@ CONTAINS
          CALL timeset(routineN, handle)
 
       NULLIFY (my_CG, qs_kind_set, dft_control,qs_control)
-      NULLIFY (tmp_basis, grid_atom, harmonics) 
+      NULLIFY (grid_atom, harmonics, tmp_basis) 
 
 !!  Initialization of some integer for the CG coeff generation
       CALL get_qs_env(qs_env,&
@@ -1499,7 +1551,7 @@ SUBROUTINE soc_contract_evect(fm_start, fm_res)
              CALL cp_fm_to_fm_submat(fm_start(jj,ii),&
                                     fm_res,&
                                     nao,nactive,&
-                                    1,1,1,&!1+nactive*(ii-1)) 
+                                    1,1,1,& 
                                     1+nactive*(ii-1)+(jj-1)*nao*nstates)
          END DO !nspins
        END DO !nsstates
@@ -1888,7 +1940,8 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
       CALL cp_fm_struct_release(tmp_struct)
       CALL cp_fm_struct_release(sggs_struct)
 
-      DEALLOCATE(diag, gsgs_op)
+      DEALLOCATE(sggs_block)
+      DEALLOCATE(diag, gsgs_op, mo_op)
       CALL timestop(handle)
 
    END SUBROUTINE get_rcs_amew_op

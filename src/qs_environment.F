@@ -772,9 +772,10 @@ CONTAINS
       IF ((dft_control%qs_control%method_id == do_method_gpw) .OR. &
           (dft_control%qs_control%method_id == do_method_gapw_xc) .OR. &
           (dft_control%qs_control%method_id == do_method_ofgpw)) THEN
-         IF (all_potential_present) THEN
-            CPABORT("All-electron calculations with GPW, GAPW_XC, and OFGPW are not implemented")
-         END IF
+          !! DEBUG:: We will force GPW to use ALL Potential!!
+         !IF (all_potential_present) THEN
+         !   CPABORT("All-electron calculations with GPW, GAPW_XC, and OFGPW are not implemented")
+         !END IF
       END IF
 
       ! DFT+U
@@ -909,7 +910,7 @@ CONTAINS
 
       END IF
 
-      IF (dft_control%do_xas_tdp_calculation .OR. dft_control%tddfpt2_control%do_soc) THEN
+      IF (dft_control%do_xas_tdp_calculation) THEN !.OR. dft_control%tddfpt2_control%do_soc) THEN
          ! Check if RI_XAS basis is given, auto-generate if not
          CALL get_qs_env(qs_env, nkind=nkind)
          DO ikind = 1, nkind
@@ -943,7 +944,7 @@ CONTAINS
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_HXC")
          maxlgto = MAX(maxlgto, maxlgto_lri)
       END IF
-      IF (dft_control%do_xas_tdp_calculation .OR. dft_control%tddfpt2_control%do_soc) THEN
+      IF (dft_control%do_xas_tdp_calculation) THEN !.OR. dft_control%tddfpt2_control%do_soc) THEN
          !done as a precaution
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_XAS")
          maxlgto = MAX(maxlgto, maxlgto_lri)

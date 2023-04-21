@@ -53,6 +53,10 @@ MODULE atom_utils
    USE qs_grid_atom,                    ONLY: grid_atom_type
    USE splines,                         ONLY: spline3ders
    USE string_utilities,                ONLY: uppercase
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
+                                              cp_logger_get_default_unit_nr,&
+                                              cp_logger_type                                         
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -1081,14 +1085,28 @@ CONTAINS
       INTEGER                                            :: i, nc
       REAL(dp)                                           :: int1, int2
       REAL(dp), DIMENSION(:), POINTER                    :: r, wr
+      !TYPE(cp_logger_type), POINTER                    :: logger
+      !INTEGER :: log_unit
+
+      !logger => cp_get_default_logger()       
+      !IF (logger%para_env%ionode) THEN  
+      !   log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      !ELSE                                    
+      !   log_unit = -1                        
+      !END IF      
 
       nc = MIN(SIZE(cpot), SIZE(density))
       r => grid%rad
       wr => grid%wr
+  !    IF (log_unit>0) WRITE(log_unit,"(A, A, A, F18.6)") "r", "nc,", "wr",grid%wr
+  !    IF (log_unit>0) WRITE(log_unit,"(A, I8)") "nc,", nc
+  !    IF (log_unit>0) WRITE(log_unit,"(A, F18.6)") "r,", r
+  !    CPABORT("in coulomb_pot")
 
       int1 = fourpi*integrate_grid(density, grid)
       int2 = 0._dp
       cpot(nc:) = int1/r(nc:)
+   !   IF (log_unit>0) WRITE(log_unit,"(A,2F10.8)") "r", int1, cpot(nc:)
 
       ! test that grid is decreasing
       CPASSERT(r(1) > r(nc))
