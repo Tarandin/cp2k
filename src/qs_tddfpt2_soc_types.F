@@ -18,7 +18,6 @@ MODULE qs_tddfpt2_soc_types
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
                                               cp_fm_type
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_copy,&
                                               dbcsr_create,&
                                               dbcsr_p_type,&
@@ -141,7 +140,7 @@ CONTAINS
 
       SUBROUTINE soc_atom_release(soc_atom_env)
          TYPE(soc_atom_env_type), POINTER                 :: soc_atom_env
-         INTEGER                                          :: i, j, k
+         INTEGER                                          :: i
 
          IF (ASSOCIATED(soc_atom_env%grid_atom_set)) THEN
             DO i = 1, SIZE(soc_atom_env%grid_atom_set)

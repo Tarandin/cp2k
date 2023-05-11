@@ -57,7 +57,6 @@ MODULE qs_tddfpt2_soc
                                               cp_print_key_finished_output,&
                                               cp_print_key_unit_nr,&
                                               cp_rm_iter_level
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_copy,&
                                               dbcsr_create,&
                                               dbcsr_multiply, &
@@ -92,6 +91,7 @@ MODULE qs_tddfpt2_soc
    USE kinds,                           ONLY: dp,&
                                               default_string_length
    USE mathlib,                         ONLY: get_diag
+   USE message_passing,                 ONLY: mp_para_env_type
    USE orbital_pointers,                ONLY: indco,&
                                               indso,&
                                               nco,&
@@ -152,7 +152,7 @@ MODULE qs_tddfpt2_soc
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt2_soc'
 
-   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
+   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .FALSE.
 
    INTEGER, PARAMETER, PRIVATE          :: nderivs = 3
    INTEGER, PARAMETER, PRIVATE          :: maxspins = 2
@@ -205,7 +205,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       logger => cp_get_default_logger()
-      IF (logger%para_env%ionode) THEN
+      IF (logger%para_env%is_source()) THEN
          log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
       ELSE
          log_unit = -1
@@ -263,7 +263,7 @@ CONTAINS
                                                    dipol_form       
       TYPE(cp_blacs_env_type), POINTER          :: blacs_env
       TYPE(cp_logger_type), POINTER             :: logger
-      TYPE(cp_para_env_type), POINTER           :: para_env
+      TYPE(mp_para_env_type), POINTER        :: para_env
       TYPE(cp_fm_type)                          :: real_fm,& 
                                                    img_fm
       TYPE(cp_fm_struct_type), POINTER          :: full_struct 
@@ -353,7 +353,7 @@ CONTAINS
       CALL get_mo_set(mos(1), nao=nao, homo=nactive) 
 
       ! this will create the H^SOC in an atomic basis
-      CALL integrate_soc_atoms(soc_env%orb_soc, qs_env, soc_atom_env=soc_atom_env)
+      CALL integrate_soc_atoms(soc_env%orb_soc, qs_env=qs_env, soc_atom_env=soc_atom_env)
       CALL soc_atom_release(soc_atom_env)
 
       !! Point at H^SOC and MOs for better readablity of the code
@@ -573,6 +573,7 @@ CONTAINS
          soc_gst = sqrt2*SUM(diag)
          CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
       END DO
+
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(A,2F18.6)") "<0|H_z|T> in Hartree / cm^-1", soc_gst, soc_gst*wavenumbers
       ENDIF
@@ -640,12 +641,13 @@ CONTAINS
                               s_firstcol=1,&
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 1)
+
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
          CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
          CALL dbcsr_scale(dbcsr_dummy,wavenumbers)
          CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
-      ENDIF
+      END IF
 
       !<S|H_x|T^+1> takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
@@ -937,7 +939,7 @@ CONTAINS
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
       !!DEBUG or Output?
-      IF (logger%para_env%ionode) THEN
+      IF (logger%para_env%is_source()) THEN
          log_unit = cp_print_key_unit_nr(logger,& 
                                          tddfpt_print_section,&
                                          "SOC_PRINT", &
@@ -970,7 +972,7 @@ CONTAINS
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
 
-!  Diagonalize the Hamiltonian
+  !Diagonalize the Hamiltonian
       ALLOCATE (tmp_evals(ntot))
       CALL cp_cfm_create(evecs_cfm, full_struct)
       CALL cp_cfm_heevd(hami_cfm, evecs_cfm, tmp_evals)
@@ -979,30 +981,36 @@ CONTAINS
       ALLOCATE (soc_env%soc_evals(ntot - 1))
       soc_env%soc_evals(:) = tmp_evals(2:ntot) - tmp_evals(1)
 
-!  Compute the dipole oscillator strengths
+  !Compute the dipole oscillator strengths
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                      evecs_cfm, eps_filter, dipol_form)
 
-!   Create final output
-      IF (logger%para_env%ionode) THEN
+   !Create final output
+      IF (logger%para_env%is_source()) THEN
          log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
       ELSE
          log_unit = -1
       END IF
 
       IF (log_unit > 0) THEN
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
+         WRITE(log_unit,'(A)') "                          SOC CORRECTED SPECTRUM                              "
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
             WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate), soc_env%soc_osc(istate)
          END DO
       END IF
       IF (log_unit > 0) THEN
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [cm^-1]  Oscillator strengths [a.u.]"
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
             WRITE(log_unit,'(6X,I3,11X,2F18.6)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
          END DO
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
       END IF
 
 !! clean up
@@ -1018,9 +1026,9 @@ CONTAINS
      CALL dbcsr_release(dbcsr_ovlp)
      CALL dbcsr_release(dbcsr_tmp)
      CALL dbcsr_release(dbcsr_work)
-     DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
+     !DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
      DEALLOCATE (coeffs_dist, prod_dist, col_dist, col_blk_size, row_dist_new)
-     DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
+     !DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
 
      CALL timestop(handle)
 
@@ -1044,7 +1052,7 @@ CONTAINS
          TYPE(qs_kind_type), DIMENSION(:), POINTER        :: qs_kind_set
          TYPE(particle_type), DIMENSION(:), POINTER       :: particle_set
          TYPE(cp_blacs_env_type), POINTER                 :: blacs_env
-         TYPE(cp_para_env_type), POINTER                  :: para_env
+         TYPE(mp_para_env_type), POINTER               :: para_env
          TYPE(soc_atom_env_type), POINTER, INTENT(OUT)    :: soc_atom_env
          TYPE(soc_env_type), INTENT(OUT), TARGET          :: soc_env
          TYPE(dbcsr_p_type), DIMENSION(:), POINTER        :: matrix_s,work
@@ -1564,7 +1572,7 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                         soc_evecs_cfm, eps_filter, dipol_form)
       TYPE(qs_environment_type)                     :: qs_env
       TYPE(cp_blacs_env_type), POINTER              :: blacs_env
-      TYPE(cp_para_env_type), POINTER               :: para_env
+      TYPE(mp_para_env_type), POINTER            :: para_env
       TYPE(soc_env_type), TARGET                    :: soc_env
       TYPE(cp_cfm_type), INTENT(in)                 :: soc_evecs_cfm
       REAL(dp), INTENT(IN)                          :: eps_filter
@@ -1707,7 +1715,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                                  sggs_block
    REAL(dp), INTENT(IN)                       :: eps_filter
    TYPE(cp_blacs_env_type), POINTER           :: blacs_env
-   TYPE(cp_para_env_type), POINTER            :: para_env
+   TYPE(mp_para_env_type), POINTER         :: para_env
    INTEGER                                    :: handle
    CHARACTER(len=*), PARAMETER                :: routineN = "get_rcs_amew_op"
 

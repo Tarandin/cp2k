@@ -38,7 +38,7 @@ MODULE input_cp2k_properties_dft
         ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, scan_x, scan_xy, &
         scan_xyz, scan_xz, scan_y, scan_yz, scan_z, tddfpt_dipole_berry, tddfpt_dipole_length, &
         tddfpt_dipole_velocity, tddfpt_kernel_full, tddfpt_kernel_none, tddfpt_kernel_stda, &
-        use_mom_ref_coac, use_mom_ref_com, use_mom_ref_user,use_mom_ref_zero,& 
+        use_mom_ref_coac, use_mom_ref_com, use_mom_ref_user,use_mom_ref_zero,&
         tddfpt_soc_dipol_len, tddfpt_soc_dipol_vel
    USE input_cp2k_atprop,               ONLY: create_atprop_section
    USE input_cp2k_dft,                  ONLY: create_ddapc_restraint_section,&
@@ -1384,7 +1384,7 @@ CONTAINS
                           "Density Functional Perturbation Theory. "// &
                           "Current implementation works for hybrid functionals. "// &
                           "Can be used with Gaussian and Plane Waves (GPW) method only.", &
-                          n_keywords=12, n_subsections=7, repeats=.FALSE., &
+                          n_keywords=12, n_subsections=4, repeats=.FALSE., &
                           citations=(/Iannuzzi2005/))
 
       NULLIFY (keyword, print_key, subsection)
@@ -1805,13 +1805,11 @@ CONTAINS
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
 
-
       CALL cp_print_key_section_create(print_key, __LOCATION__, name = "SOC_PRINT", &
                       description="Controls the printout of the tddfpt2_soc modul", &
                       print_level = debug_print_level + 1, filename="SOC")
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
-
 
       CALL cp_print_key_section_create(print_key, __LOCATION__, name="FORCES", &
                                        description="Controls the calculation and printing of excited state forces."// &

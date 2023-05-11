@@ -693,6 +693,7 @@ CONTAINS
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: recv_buff, send_buff
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(dbcsr_distribution_type)                      :: sinv_dist
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dbcsr_iterator_type)                          :: iter
@@ -882,6 +883,7 @@ CONTAINS
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmat_block, pmat_blockt, sinv_block, &
                                                             sinv_blockt
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: overlap, rho_ao
       TYPE(dbcsr_type)                                   :: ri_sinv
@@ -1112,7 +1114,7 @@ CONTAINS
             DO iat = 1, natom
                IF ((.NOT. ANY(xas_atom_env%exat_neighbors(iex)%array == iat)) &
                    .AND. (.NOT. xas_atom_env%excited_atoms(iex) == iat)) CYCLE
-               CALL para_env%group%sum(xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
+               CALL para_env%sum(xas_atom_env%ri_dcoeff(iat, ispin, iex)%array)
             END DO !iat
          END DO !ispin
       END DO !iex
@@ -1731,6 +1733,7 @@ CONTAINS
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: rexp
       REAL(dp), DIMENSION(:, :), POINTER                 :: dgr1, dgr2, ga, gr, slm, zet
       REAL(dp), DIMENSION(:, :, :), POINTER              :: dga1, dga2, dslm_dxyz
+      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(grid_atom_type), POINTER                      :: grid_atom
       TYPE(gto_basis_set_type), POINTER                  :: ri_basis
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
@@ -2085,6 +2088,7 @@ CONTAINS
       REAL(dp), DIMENSION(:, :, :), POINTER              :: dga1, dga2
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: int_so, vxc
       TYPE(cp_3d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: vxg
+      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(grid_atom_type), POINTER                      :: grid_atom
       TYPE(gto_basis_set_type), POINTER                  :: ri_basis
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
@@ -3234,8 +3238,8 @@ CONTAINS
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
 
-      TYPE(cp_logger_type), POINTER                    :: logger
-      INTEGER                                          :: log_unit
+      !TYPE(cp_logger_type), POINTER                    :: logger
+      !INTEGER                                          :: log_unit
 
       NULLIFY (grid_atom, harmonics, basis, qs_kind_set, dslm_dxyz, slm, lmin, lmax, npgf, zet)
 
@@ -3384,7 +3388,7 @@ CONTAINS
 !> \note We compute: <da_dx|V\(4c^2-2V)|db_dy> - <da_dy|V\(4c^2-2V)|db_dx>, where V is a model
 !>       potential on the atomic grid. What we get is purely imaginary
 ! **************************************************************************************************
-   SUBROUTINE integrate_soc_atoms(matrix_soc, qs_env, xas_atom_env, soc_atom_env,log_unit)
+   SUBROUTINE integrate_soc_atoms(matrix_soc, xas_atom_env, qs_env, soc_atom_env,log_unit)
 
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_soc
       TYPE(xas_atom_env_type), POINTER, OPTIONAL         :: xas_atom_env
@@ -3429,10 +3433,10 @@ CONTAINS
           CALL get_qs_kind(qs_kind_set(ikind), grid_atom=grid) 
          ENDIF
          CALL get_gto_basis_set(basis, nset=nset, maxso=maxso)
-       !  IF (present(log_unit)) THEN
+         IF (present(log_unit)) THEN
        !  IF (log_unit>0) WRITE(log_unit,"(A,F18.6,A,I8)") "zeff", zeff, "ikind", ikind
        !  IF (log_unit>0) WRITE(log_unit,"(A,2I8)") "nset, maxso", nset, maxso
-       !   ENDIF
+          ENDIF
          ALLOCATE (intso(nset*maxso, nset*maxso, 3))
 
          ! compute the model potential on the grid
