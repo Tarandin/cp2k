@@ -25,8 +25,7 @@ MODULE qs_tddfpt2_restart
                                               cp_fm_type,&
                                               cp_fm_write_formatted,&
                                               cp_fm_write_info,&
-                                              cp_fm_write_unformatted,&
-                                              cp_fm_to_fm
+                                              cp_fm_write_unformatted
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_finished_output,&
@@ -511,65 +510,37 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE tddfpt_check_orthonormality(evects, ounit, S_evects, matrix_s)
 
-      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)           :: evects
-      INTEGER, INTENT(in)                                     :: ounit
-      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in),OPTIONAL  :: S_evects
-      TYPE(dbcsr_type), INTENT(in), POINTER                   :: matrix_s
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: evects
+      INTEGER, INTENT(in)                                :: ounit
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: S_evects
+      TYPE(dbcsr_type), INTENT(in), POINTER              :: matrix_s
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_check_orthonormality'
 
       INTEGER                                            :: handle, ispin, ivect, jvect, nspins, &
-                                                            nvects_total, istate
+                                                            nvects_total
       INTEGER, DIMENSION(maxspins)                       :: nactive
       REAL(kind=dp)                                      :: norm
       REAL(kind=dp), DIMENSION(maxspins)                 :: weights
-      TYPE(cp_fm_type), DIMENSION(:, :), ALLOCATABLE     :: S_evects_here
-      TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
 
       CALL timeset(routineN, handle)
 
       nspins = SIZE(evects, 1)
       nvects_total = SIZE(evects, 2)
 
-      NULLIFY(matrix_struct)
-      ALLOCATE(S_evects_here(nspins,nvects_total))
-
-      DO ispin=1,nspins
-         DO istate=1,nvects_total
-          CALL cp_fm_get_info(matrix=evects(ispin,1),matrix_struct=matrix_struct,ncol_global=nactive(ispin))
-          CALL cp_fm_create(S_evects_here(ispin,istate),matrix_struct)
-         ENDDO
-      ENDDO
-
-      IF (PRESENT(S_evects)) THEN
-       DO ispin=1,nspins
-         DO istate=1,nvects_total
-          CALL cp_fm_to_fm(S_evects(ispin,istate), S_evects_here(ispin,istate))
-         ENDDO
-       ENDDO
-      ELSE
-       DO ispin=1,nspins
-         IF (ounit>0) WRITE(ounit,"(A,I8)") "nactive", nactive(ispin)
-         DO istate=1,nvects_total
-          CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, istate), S_evects_here(ispin, istate),&
-                                       ncol=nactive(ispin), alpha=1.0_dp, beta=0.0_dp)
-         ENDDO
-       ENDDO
-      ENDIF
-
       IF (debug_this_module) THEN
          CPASSERT(SIZE(S_evects, 1) == nspins)
          CPASSERT(SIZE(S_evects, 2) == nvects_total)
       END IF
 
-!      DO ispin = 1, nspins
-!         CALL cp_fm_get_info(matrix=evects(ispin, 1), ncol_global=nactive(ispin))
-!      END DO
+      DO ispin = 1, nspins
+         CALL cp_fm_get_info(matrix=evects(ispin, 1), ncol_global=nactive(ispin))
+      END DO
 
       DO jvect = 1, nvects_total
          ! <psi1_i | psi1_j>
          DO ivect = 1, jvect - 1
-            CALL cp_fm_trace(evects(:, jvect), S_evects_here(:, ivect), weights(1:nspins), accurate=.FALSE.)
+            CALL cp_fm_trace(evects(:, jvect), S_evects(:, ivect), weights(1:nspins), accurate=.FALSE.)
             norm = SUM(weights(1:nspins))
 
             DO ispin = 1, nspins
@@ -579,26 +550,18 @@ CONTAINS
 
          ! <psi1_j | psi1_j>
          DO ispin = 1, nspins
-            CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, jvect), S_evects_here(ispin, jvect), &
+            CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, jvect), S_evects(ispin, jvect), &
                                          ncol=nactive(ispin), alpha=1.0_dp, beta=0.0_dp)
          END DO
 
-         CALL cp_fm_trace(evects(:, jvect), S_evects_here(:, jvect), weights(1:nspins), accurate=.FALSE.)
+         CALL cp_fm_trace(evects(:, jvect), S_evects(:, jvect), weights(1:nspins), accurate=.FALSE.)
 
          norm = SUM(weights(1:nspins))
          norm = 1.0_dp/SQRT(norm)
 
-       !  IF ((ounit > 0) .AND. debug_this_module) WRITE (ounit, '(A,F10.8)') "norm", norm
-         IF (ounit > 0) WRITE(ounit, '(A,F10.8)') "norm", norm
+         IF ((ounit > 0) .AND. debug_this_module) WRITE (ounit, '(A,F10.8)') "norm", norm
 
       END DO
-
-      DO ispin=1,nspins
-         DO istate=1,nvects_total
-         CALL cp_fm_release(S_evects_here(ispin,istate))
-         ENDDO
-      ENDDO
-      DEALLOCATE(S_evects_here)
 
       CALL timestop(handle)
 
