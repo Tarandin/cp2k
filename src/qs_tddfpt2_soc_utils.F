@@ -144,7 +144,6 @@ CONTAINS
       IF (PRESENT(symmetric)) my_symm = symmetric
       do_diags = .FALSE.
       IF (PRESENT(pref_diags)) do_diags = .TRUE.
-      my_symm = .FALSE.
 
 
       CALL dbcsr_set(amew_soc, 0.0_dp)
@@ -179,8 +178,8 @@ CONTAINS
          pblock = pref_overall*soc_elem
       END DO
       CALL dbcsr_iterator_stop(iter)
-
-      CALL dbcsr_iterator_stop(iter)
+   
+      DEALLOCATE(diag)
 
    END SUBROUTINE rcs_amew_soc_elements
 END MODULE qs_tddfpt2_soc_utils

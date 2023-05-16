@@ -335,7 +335,7 @@ CONTAINS
          END IF
 
          IF (xas_tdp_control%do_soc .OR. xas_tdp_control%do_gw2x) THEN
-            CALL integrate_soc_atoms(xas_tdp_env%orb_soc, qs_env, xas_atom_env=xas_atom_env)
+            CALL integrate_soc_atoms(xas_tdp_env%orb_soc,xas_atom_env=xas_atom_env, qs_env=qs_env)
          END IF
 
          CALL xas_atom_env_release(xas_atom_env)

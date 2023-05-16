@@ -667,8 +667,7 @@ CONTAINS
          CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
       ENDIF
 
-
-!      !singlet-triplet with Ms=+-1, real part
+       !!singlet-triplet with Ms=+-1, real part
        !! Precompute <S|H_y|T>
       CALL dbcsr_multiply('N', 'N', 1.0_dp,&
                           orb_soc_y, dbcsr_tp,&
@@ -1001,10 +1000,11 @@ CONTAINS
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate), soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
          END DO
       END IF
       IF (log_unit > 0) THEN
+         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [cm^-1]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
@@ -1026,7 +1026,7 @@ CONTAINS
      CALL dbcsr_release(dbcsr_ovlp)
      CALL dbcsr_release(dbcsr_tmp)
      CALL dbcsr_release(dbcsr_work)
-     !DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
+     DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
      DEALLOCATE (coeffs_dist, prod_dist, col_dist, col_blk_size, row_dist_new)
      !DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
 

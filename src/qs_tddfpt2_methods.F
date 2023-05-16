@@ -143,7 +143,7 @@ CONTAINS
                                                             nspins, nstates, old_state
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
-                                                            state_change, do_soc, lmult_tmp
+                                                            state_change, do_soc,lmult_tmp
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -279,38 +279,16 @@ CONTAINS
          nstates = tddfpt_control%nstates
          CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, do_exck, &
                                           qs_env, sub_env)
-
-         CALL tddfpt_construct_ground_state_orb_density(&
-                   rho_orb_struct=work_matrices%rho_orb_struct_sub, &
-                   rho_xc_struct=work_matrices%rho_xc_struct_sub, &
-                   is_rks_triplets=tddfpt_control%rks_triplets, &
-                   qs_env=qs_env, sub_env=sub_env, &
-                   wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub)
          
       END IF
 
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
-            kernel_env%full_kernel => full_kernel_env
-            kernel_env%admm_kernel => kernel_env_admm_aux
-         ELSE
-            ! Full kernel
-            CALL create_kernel_env(kernel_env=full_kernel_env, &
-                           rho_struct_sub=work_matrices%rho_orb_struct_sub, &
-                           xc_section=xc_section, &
-                           is_rks_triplets=tddfpt_control%rks_triplets,&
-                           sub_env=sub_env)
-            kernel_env%full_kernel => full_kernel_env
-            NULLIFY (kernel_env%admm_kernel)
-         END IF
-         ! Fxc from kernel definition
-         kernel_env%full_kernel%do_exck = do_exck
-         ! initilize xc kernel
-         IF (do_exck) THEN
-            CALL create_fxc_kernel(work_matrices%rho_orb_struct_sub, work_matrices%fxc_rspace_sub, &
-                                   xc_section, tddfpt_control%rks_triplets, sub_env, qs_env)
-         END IF
+         kernel_env%full_kernel => full_kernel_env
+         kernel_env%admm_kernel => kernel_env_admm_aux
+         NULLIFY(kernel_env%stda_kernel)
+         ! create full_kernel and admm_kernel within tddfpt_energies
       ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
-         ! sTDA kernel
+         ! setup for kernel_stda outside tddfpt_energies
          nactive = 0
          CALL cp_fm_get_info(gs_mos(1)%mos_occ, nrow_global=nao)
          DO ispin = 1, SIZE(gs_mos)
@@ -339,8 +317,6 @@ CONTAINS
          NULLIFY (kernel_env%full_kernel)
          NULLIFY (kernel_env%admm_kernel)
          NULLIFY (kernel_env%stda_kernel)
-      ELSE
-         CPABORT('Unknown kernel type')
       END IF
 
       IF (tddfpt_control%do_lrigpw) THEN
@@ -857,9 +833,9 @@ CONTAINS
                                                             iter, log_unit, mult, &
                                                             niters,nstates,&
                                                             nstates_read,nstate_max,&
-                                                            nocc, nvirt, ispin, nspins
+                                                            nocc, nvirt
       LOGICAL                                            :: explicit,is_restarted, do_soc, &
-                                                            do_admm
+                                                            do_admm, do_exck
       REAL(kind=dp)                                      :: conv
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -937,9 +913,17 @@ CONTAINS
             kernel_env%full_kernel => full_kernel_env
             NULLIFY (kernel_env%admm_kernel)
          END IF
+         ! Fxc from kernel definition
+         kernel_env%full_kernel%do_exck = do_exck
+         ! initilize xc kernel
+         IF (do_exck) THEN
+            CALL create_fxc_kernel(work_matrices%rho_orb_struct_sub, work_matrices%fxc_rspace_sub, &
+                                   xc_section, tddfpt_control%rks_triplets, sub_env, qs_env)
+         END IF
       END IF
+
       !! Too many states cal lead to Problems
-      !! You should be warnd if there are mor states 
+      !! You should be warned if there are mor states 
       !! then occ-virt Combinations!!
       CALL cp_fm_get_info(gs_mos(1)%mos_occ, ncol_global=nocc)
       CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
@@ -1175,13 +1159,14 @@ CONTAINS
 
       INTEGER                                            :: mult
       INTEGER                                            :: handle, ispin, istate, nspins
+      INTEGER                                            :: log_unit
    
       CALL timeset(routineN, handle)
 
-!      log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
-!                                  "PROGRAM_BANNER", &
-!                                   extension=".tddfptLog")
-!      CALL tddfpt_soc_header(log_unit)
+      log_unit = cp_print_key_unit_nr(logger,tddfpt_print_section, &
+                                  "PROGRAM_BANNER", &
+                                   extension=".tddfptLog")
+      CALL tddfpt_soc_header(log_unit)
 
       nspins = SIZE(gs_mos)
       ALLOCATE(evects_mult(nspins,nstates))
@@ -1189,20 +1174,20 @@ CONTAINS
 
       ! First multiplicity
       IF (lmult_tmp) THEN
-      !  IF (log_unit > 0) THEN    
-      !   WRITE (log_unit, "(1X,A)") "", &
-      !      "-------------------------------------------------------------------------------", &
-      !      "-------------------------------------------------------------------------------", &
-      !      "-                      TDDFPT SINGLET ENERGIES                                -"
-      !  END IF                          
+        IF (log_unit > 0) THEN    
+         WRITE (log_unit, "(1X,A)") "", &
+            "-------------------------------------------------------------------------------", &
+            "-                      TDDFPT SINGLET ENERGIES                                 -",&
+            "-------------------------------------------------------------------------------"
+        END IF                          
         mult=1
       ELSE
-      !  IF (log_unit > 0) THEN    
-      !   WRITE (log_unit, "(1X,A)") "", &
-      !      "-------------------------------------------------------------------------------", &
-      !      "-------------------------------------------------------------------------------", &
-      !      "-                      TDDFPT TRIPLET ENERGIES                                -"
-      !  END IF
+        IF (log_unit > 0) THEN    
+         WRITE (log_unit, "(1X,A)") "", &
+            "-------------------------------------------------------------------------------", &
+            "-                      TDDFPT TRIPLET ENERGIES                                 -",&
+            "-------------------------------------------------------------------------------"
+        END IF
         mult=3
       END IF
 
@@ -1222,64 +1207,34 @@ CONTAINS
       tddfpt_control%rks_triplets = lmult_tmp
       ! Second multiplicity
        IF (lmult_tmp) THEN
-      !  IF (log_unit > 0) THEN
-      !    WRITE (log_unit, "(1X,A)") "", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-                      TDDFPT TRIPLET ENERGIES                                -"
-      !  END IF !log_unit
+        IF (log_unit > 0) THEN
+          WRITE (log_unit, "(1X,A)") "", &
+             "                      singlet excitations finished                             ",&
+             "                                                                               ",&
+             "-------------------------------------------------------------------------------", &
+             "-                      TDDFPT TRIPLET ENERGIES                                -", &
+             "-------------------------------------------------------------------------------"
+        END IF !log_unit
         mult=3
        ELSE
-      !  IF (log_unit > 0) THEN
-      !    WRITE (log_unit, "(1X,A)") "", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-                      TDDFPT SINGLET ENERGIES                                -"
-      !  END IF !log_unit
+        IF (log_unit > 0) THEN
+          WRITE (log_unit, "(1X,A)") "", &
+             "                      triplet excitations finished                             ",&
+             "                                                                               ",&
+             "-------------------------------------------------------------------------------", &
+             "-                      TDDFPT SINGLET ENERGIES                                -",&
+             "-------------------------------------------------------------------------------"
+        END IF !log_unit
         mult=1
        END IF
 
 
    CALL tddfpt_energies(qs_env, nstates, work_matrices, tddfpt_control, logger, &
-                            tddfpt_print_section, evects_mult,evals_mult, &
+                            tddfpt_print_section, evects,evals, &
                             gs_mos,tddfpt_section, S_evects, matrix_s, &
-                            kernel_env, matrix_ks, sub_env, ostrength_mult, &
+                            kernel_env, matrix_ks, sub_env, ostrength, &
                             dipole_op_mos_occ, mult, xc_section, full_kernel_env, &
                             kernel_env_admm_aux)
-
-      ! Clean up in between for full kernel
-      IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
-         IF (tddfpt_control%do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
-         CALL release_kernel_env(kernel_env%full_kernel)
-      END IF
-
-      tddfpt_control%rks_triplets = lmult_tmp
-      ! Second multiplicity
-       IF (lmult_tmp) THEN
-      !  IF (log_unit > 0) THEN
-      !    WRITE (log_unit, "(1X,A)") "", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-                      TDDFPT TRIPLET ENERGIES                                -"
-      !  END IF !log_unit
-        mult=3
-       ELSE
-      !  IF (log_unit > 0) THEN
-      !    WRITE (log_unit, "(1X,A)") "", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-------------------------------------------------------------------------------", &
-      !       "-                      TDDFPT SINGLET ENERGIES                                -"
-      !  END IF !log_unit
-        mult=1
-       END IF
-
-       CALL tddfpt_energies(qs_env, nstates, work_matrices, tddfpt_control, logger, &
-                               tddfpt_print_section, evects, evals, &
-                               gs_mos,tddfpt_section, S_evects, matrix_s, &
-                               kernel_env, matrix_ks, sub_env, ostrength, &
-                               dipole_op_mos_occ, mult, xc_section, full_kernel_env,&
-                              kernel_env_admm_aux)
-
 
        ! Compute perturbative SOC correction
        ! Order should always be singlet triplet in tddfpt_soc

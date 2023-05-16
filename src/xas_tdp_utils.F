@@ -1969,7 +1969,6 @@ CONTAINS
                                                             dbcsr_tmp, dbcsr_tp, dbcsr_work, &
                                                             orb_soc_x, orb_soc_y, orb_soc_z
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      INTEGER                                            :: output_unit
 
       NULLIFY (sg_coeffs, tp_coeffs, gs_coeffs, sg_evals, tp_evals, full_struct)
       NULLIFY (para_env, blacs_env, prod_struct, vec_struct, orb_soc_y, orb_soc_z)
@@ -2968,7 +2967,6 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: dip_struct, full_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: amew_dip
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      INTEGER                                            :: output_unit
 
       NULLIFY (para_env, blacs_env, dip_struct, full_struct, osc_str)
       NULLIFY (soc_evals)

@@ -693,7 +693,6 @@ CONTAINS
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: recv_buff, send_buff
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(dbcsr_distribution_type)                      :: sinv_dist
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dbcsr_iterator_type)                          :: iter
@@ -883,7 +882,6 @@ CONTAINS
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmat_block, pmat_blockt, sinv_block, &
                                                             sinv_blockt
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: overlap, rho_ao
       TYPE(dbcsr_type)                                   :: ri_sinv
@@ -1733,7 +1731,6 @@ CONTAINS
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: rexp
       REAL(dp), DIMENSION(:, :), POINTER                 :: dgr1, dgr2, ga, gr, slm, zet
       REAL(dp), DIMENSION(:, :, :), POINTER              :: dga1, dga2, dslm_dxyz
-      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(grid_atom_type), POINTER                      :: grid_atom
       TYPE(gto_basis_set_type), POINTER                  :: ri_basis
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
@@ -2088,7 +2085,6 @@ CONTAINS
       REAL(dp), DIMENSION(:, :, :), POINTER              :: dga1, dga2
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: int_so, vxc
       TYPE(cp_3d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: vxg
-      TYPE(mp_para_env_type), POINTER                 :: para_env
       TYPE(grid_atom_type), POINTER                      :: grid_atom
       TYPE(gto_basis_set_type), POINTER                  :: ri_basis
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
