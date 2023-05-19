@@ -1028,7 +1028,7 @@ CONTAINS
      CALL dbcsr_release(dbcsr_work)
      DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
      DEALLOCATE (coeffs_dist, prod_dist, col_dist, col_blk_size, row_dist_new)
-     !DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
+     DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
 
      CALL timestop(handle)
 

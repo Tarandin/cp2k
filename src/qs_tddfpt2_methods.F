@@ -319,11 +319,6 @@ CONTAINS
          NULLIFY (kernel_env%stda_kernel)
       END IF
 
-      IF (tddfpt_control%do_lrigpw) THEN
-         CALL tddfpt2_lri_init(qs_env, kernel_env, lri_section, &
-                              tddfpt_print_section)
-      END IF
-
       ALLOCATE (evects(nspins, nstates))
       ALLOCATE (evals(nstates))
 
@@ -849,7 +844,7 @@ CONTAINS
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
       TYPE(section_vals_type), POINTER                   :: namd_print_section, &
                                                             tddfpt_print_section, tddfpt_section,&
-                                                            soc_section, xc_section
+                                                            soc_section, xc_section, lri_section
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
@@ -914,12 +909,20 @@ CONTAINS
             NULLIFY (kernel_env%admm_kernel)
          END IF
          ! Fxc from kernel definition
+         do_exck = tddfpt_control%do_exck
          kernel_env%full_kernel%do_exck = do_exck
          ! initilize xc kernel
          IF (do_exck) THEN
             CALL create_fxc_kernel(work_matrices%rho_orb_struct_sub, work_matrices%fxc_rspace_sub, &
                                    xc_section, tddfpt_control%rks_triplets, sub_env, qs_env)
          END IF
+      END IF
+
+       ! lri input
+      IF (tddfpt_control%do_lrigpw) THEN
+         lri_section => section_vals_get_subs_vals(tddfpt_section, "LRIGPW")
+         CALL tddfpt2_lri_init(qs_env, kernel_env, lri_section, &
+                              tddfpt_print_section)
       END IF
 
       !! Too many states cal lead to Problems
