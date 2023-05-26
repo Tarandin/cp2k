@@ -139,8 +139,7 @@ CONTAINS
              
 
       ALLOCATE (diag(SIZE(mo_soc, 1)))
-      my_symm = .FALSE.
-      
+      my_symm = .FALSE.      
       IF (PRESENT(symmetric)) my_symm = symmetric
       do_diags = .FALSE.
       IF (PRESENT(pref_diags)) do_diags = .TRUE.
@@ -166,7 +165,6 @@ CONTAINS
          CALL dbcsr_get_block_p(lr_overlap, iex, jex, pblock, found)
          IF (found) THEN
             soc_elem = soc_elem + pref_trace*SUM(pblock*TRANSPOSE(mo_soc))
-
 
           IF (do_diags) THEN
              diag(:) = get_diag(pblock)

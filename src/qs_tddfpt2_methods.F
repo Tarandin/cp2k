@@ -233,9 +233,6 @@ CONTAINS
          CALL cp_abort(__LOCATION__, "LRI only implemented for full kernel")
       END IF
 
-      !NULLIFY (admm_env)
-      !IF (do_admm) CALL get_qs_env(qs_env, admm_env=admm_env)
-
       IF (ASSOCIATED(matrix_ks_oep)) matrix_ks => matrix_ks_oep
 
       ! components of the dipole operator
@@ -1087,7 +1084,7 @@ CONTAINS
                                           tddfpt_print_section, &
                                           matrix_s(1)%matrix,&
                                           S_evects,&
-                                          sub_env) !qs_env, sub_env)
+                                          sub_env) 
       END IF
       ALLOCATE (ostrength(nstates))
       ostrength = 0.0_dp

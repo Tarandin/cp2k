@@ -116,7 +116,13 @@ CONTAINS
          CALL cp_fm_release(soc_env%b_coeff)
          IF (ASSOCIATED(soc_env%evals_a)) NULLIFY(soc_env%evals_a)
          IF (ASSOCIATED(soc_env%evals_b)) NULLIFY(soc_env%evals_b)
-         IF (ASSOCIATED(soc_env%dipmat)) NULLIFY(soc_env%dipmat)
+         IF (ASSOCIATED(soc_env%dipmat)) THEN
+                 DO i = 1,SIZE(soc_env%dipmat)
+                        CALL dbcsr_release(soc_env%dipmat(i)%matrix)
+                        DEALLOCATE(soc_env%dipmat(i)%matrix)
+                 END DO
+                 NULLIFY(soc_env%dipmat)
+         END IF
          IF (ALLOCATED(soc_env%soc_evals)) DEALLOCATE(soc_env%soc_evals)
          IF (ALLOCATED(soc_env%soc_osc))  DEALLOCATE(soc_env%soc_osc) 
 

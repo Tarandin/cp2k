@@ -82,8 +82,7 @@ MODULE qs_tddfpt2_soc
    USE header,                          ONLY: tddfpt_header, &
                                               tddfpt_soc_header
    USE input_constants,                 ONLY: tddfpt_dipole_velocity,&
-                                              tddfpt_soc_dipol_len,&
-                                              tddfpt_soc_dipol_vel
+                                              tddfpt_dipole_length
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
@@ -225,7 +224,7 @@ CONTAINS
 
       IF (log_unit > 0) THEN
          WRITE(log_unit,'(A)') "Starting from TDDFPT Excited States:"
-         WRITE(log_unit,'(A)') "      STATE           SINGLET          TRIPLET"
+         WRITE(log_unit,'(A)') "      STATE          SINGLET/eV         TRIPLET/eV"
          DO istate = 1, SIZE(evals_a)
             WRITE(log_unit,'(6X,I3,11X,F10.5,6X,F10.5)') istate, evals_a(istate)*evolt, evals_b(istate)*evolt
          END DO
@@ -260,14 +259,15 @@ CONTAINS
                                                    iex,&
                                                    npcols,&
                                                    nprows,&
-                                                   dipol_form       
+                                                   dipole_form       
       TYPE(cp_blacs_env_type), POINTER          :: blacs_env
       TYPE(cp_logger_type), POINTER             :: logger
       TYPE(mp_para_env_type), POINTER        :: para_env
       TYPE(cp_fm_type)                          :: real_fm,& 
                                                    img_fm
       TYPE(cp_fm_struct_type), POINTER          :: full_struct 
-      TYPE(section_vals_type), POINTER          :: tddfpt_print_section
+      TYPE(section_vals_type), POINTER          :: tddfpt_print_section,&
+                                                   soc_print_section
       INTEGER                                   :: nactive, nao
       INTEGER, DIMENSION(:), POINTER            :: row_dist,&
                                                    row_dist_new,&
@@ -311,7 +311,8 @@ CONTAINS
                                                    orb_soc_z
       REAL(dp)                                  :: sqrt2, &
                                                    soc_gst, &
-                                                   eps_filter
+                                                   eps_filter,&
+                                                   tmp
       TYPE(section_vals_type), POINTER          :: soc_section
       REAL(dp), ALLOCATABLE, DIMENSION(:)       :: diag, &
                                                    tmp_evals
@@ -325,38 +326,41 @@ CONTAINS
                                                    gstp_block
       TYPE(dbcsr_soc_package_type)              :: dbcsr_soc_package
       INTEGER                                   :: ii,jj, istate
+      LOGICAL                                   :: print_ev, print_wn,&
+                                                   print_splitting
       
       CALL timeset(routineN, handle)
 
        NULLIFY (logger, pgrid, row_dist, row_dist_new)
        NULLIFY (col_dist, col_blk_size, row_blk_size, matrix_s)
-       NULLIFY (gstp_struct, tddfpt_print_section, soc_section)
+       NULLIFY (gstp_struct, tddfpt_print_section, soc_print_section, soc_section)
 
       logger => cp_get_default_logger()
       tddfpt_print_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%PRINT")
+      soc_print_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%TDDFPT%PRINT%SOC_PRINT")
       soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
 
       CALL section_vals_val_get(soc_section,"EPS_FILTER", r_val=eps_filter)
-      CALL section_vals_val_get(soc_section,"DIPOLE_FORM",i_val=dipol_form)
 
       nsg = SIZE(evals_sing)   ! Number of excited singlet states
       ntp = SIZE(evals_trip)   ! Number of excited triplett states
       nex = nsg                ! Number of excited states of each multiplicity
       ntot = 1 + nsg + 3 * ntp ! Number of (GS + S + T^-1 + T^0 + T^1)
 
-!! Initzialize Working envirment
+! Initzialize Working envirment
       CALL inititialize_soc(qs_env, soc_atom_env, soc_env, & 
-                            evects_sing, evects_trip, dipol_form)
+                            evects_sing, evects_trip, dipole_form)
 
       NULLIFY(mos)
       CALL get_qs_env(qs_env, mos=mos, para_env=para_env, blacs_env=blacs_env)
       CALL get_mo_set(mos(1), nao=nao, homo=nactive) 
 
-      ! this will create the H^SOC in an atomic basis
+     ! this will create the H^SOC in an atomic basis
       CALL integrate_soc_atoms(soc_env%orb_soc, qs_env=qs_env, soc_atom_env=soc_atom_env)
       CALL soc_atom_release(soc_atom_env)
 
-      !! Point at H^SOC and MOs for better readablity of the code
+     !! Point at H^SOC and MOs for better readablity of the code
+      NULLIFY(tp_coeffs, orb_soc_x, orb_soc_y, orb_soc_z)
       tp_coeffs => soc_env%b_coeff
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
@@ -426,6 +430,13 @@ CONTAINS
                         dist=prod_dist,row_blk_size=col_blk_size,col_blk_size=col_blk_size)
       CALL dbcsr_reserve_all_blocks(dbcsr_tmp)
 
+      IF (debug_this_module) THEN
+              ALLOCATE(dbcsr_dummy)
+              CALL dbcsr_create(matrix=dbcsr_dummy,name="DUMMY",matrix_type=dbcsr_type_no_symmetry, &
+                        dist=prod_dist,row_blk_size=col_blk_size,col_blk_size=col_blk_size)
+              CALL dbcsr_reserve_all_blocks(dbcsr_dummy)
+      END IF
+
       !! This work dbcsr matrix will be packed together for easy
       !! transfer to other subroutines
       dbcsr_soc_package%dbcsr_sg => dbcsr_sg
@@ -439,7 +450,7 @@ CONTAINS
       CALL copy_fm_to_dbcsr(soc_env%a_coeff, dbcsr_sg) 
       CALL copy_fm_to_dbcsr(soc_env%b_coeff, dbcsr_tp)
 
-!Create the work and helper fms
+      !Create the work and helper fms
       CALL get_mo_set(mos(1),mo_coeff=gs_coeffs)
       CALL cp_fm_get_info(gs_coeffs, matrix_struct=vec_struct)
       CALL cp_fm_create(vec_soc_x, vec_struct)
@@ -456,7 +467,7 @@ CONTAINS
       CALL cp_fm_create(tmp_fm, work_struct)
 
 
-!! Begin with the precomputation 
+      !! Begin with the precomputation 
       !! Prefactor due to rcs.
       !! The excitation is presented as a linear combination of
       !! alpha and beta, where dalpha=-dbeta for triplet exc.
@@ -937,7 +948,7 @@ CONTAINS
       CALL cp_cfm_create(hami_cfm, full_struct)
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
 
-      !!DEBUG or Output?
+      !!Optinal Output: SOC-Matrix
       IF (logger%para_env%is_source()) THEN
          log_unit = cp_print_key_unit_nr(logger,& 
                                          tddfpt_print_section,&
@@ -950,21 +961,46 @@ CONTAINS
          log_unit = -1
       END IF
 
+      !! We may want different units from one output
+      !! But if not needed, we may reduce the number to one to save space and time
+      CALL section_vals_val_get(soc_print_section, "UNIT_eV", l_val=print_ev)
+      CALL section_vals_val_get(soc_print_section, "UNIT_wn", l_val=print_wn)
+      CALL section_vals_val_get(soc_print_section, "SPLITTING", l_val=print_splitting)  
+
       IF (log_unit > 0) THEN
-         WRITE(log_unit,'(A)')  "____________________________________________________"
-         WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
-         WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
-         WRITE(log_unit,'(A)')  "____________________________________________________"
-         DO jj = 1,SIZE(real_fm%local_data,2)
-            DO ii = 1,SIZE(real_fm%local_data,1)
-               WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
-                  real_fm%local_data(ii,jj)*evolt,&
-                  img_fm%local_data(ii,jj)*evolt
-            END DO
-         END DO
-         WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
-         WRITE(log_unit,'(A)')  "____________________________________________________"
-         WRITE(log_unit,'(A)')  "____________________________________________________"
+         IF (print_ev) THEN
+                WRITE(log_unit,'(A)')  "____________________________________________________"
+                WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
+                WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
+                WRITE(log_unit,'(A)')  "____________________________________________________"
+                DO jj = 1,SIZE(real_fm%local_data,2)
+                        DO ii = 1,SIZE(real_fm%local_data,1)
+                                WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
+                                real_fm%local_data(ii,jj)*evolt,&
+                                img_fm%local_data(ii,jj)*evolt
+                        END DO
+                END DO
+                WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
+                WRITE(log_unit,'(A)')  "____________________________________________________"
+                WRITE(log_unit,'(A)')  "____________________________________________________"
+         END IF
+
+         IF (print_wn) THEN
+                 WRITE(log_unit,'(A)')  "____________________________________________________"
+                 WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
+                 WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
+                 WRITE(log_unit,'(A)')  "____________________________________________________"
+                 DO jj = 1,SIZE(real_fm%local_data,2)
+                        DO ii = 1,SIZE(real_fm%local_data,1)
+                                WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
+                                real_fm%local_data(ii,jj)*wavenumbers,&
+                                img_fm%local_data(ii,jj)*wavenumbers
+                        END DO
+                 END DO
+                 WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
+                 WRITE(log_unit,'(A)')  "____________________________________________________"
+                 WRITE(log_unit,'(A)')  "____________________________________________________"
+         END IF
       END IF
       !!END DEBUG
 
@@ -980,11 +1016,22 @@ CONTAINS
       ALLOCATE (soc_env%soc_evals(ntot - 1))
       soc_env%soc_evals(:) = tmp_evals(2:ntot) - tmp_evals(1)
 
+      !! We may be interested in the ground state stabilisation energy
+      IF (logger%para_env%is_source()) THEN
+         log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         log_unit = -1
+      END IF
+
+      IF (log_unit > 0) THEN
+              WRITE(log_unit,'(A27,6X,F18.10)') "Ground state stabilisation:", soc_env%soc_evals(1)
+      END IF
+
   !Compute the dipole oscillator strengths
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
-                     evecs_cfm, eps_filter, dipol_form)
+                     evecs_cfm, eps_filter, dipole_form)
 
    !Create final output
       IF (logger%para_env%is_source()) THEN
@@ -993,25 +1040,32 @@ CONTAINS
          log_unit = -1
       END IF
 
-      IF (log_unit > 0) THEN
+      IF (log_unit > 0 .AND. print_ev) THEN
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          WRITE(log_unit,'(A)') "                          SOC CORRECTED SPECTRUM                              "
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F20.10)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
          END DO
       END IF
-      IF (log_unit > 0) THEN
+      IF (log_unit > 0 .AND. print_wn) THEN
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [cm^-1]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F18.6)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F20.10)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
          END DO
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
       END IF
+
+     ! IF (log_unit > 0 .AND. print_splitting) THEN
+     !         isg = 1
+     !         itp = 1
+     !         tmp = 0.0
+
+     ! END IF
 
 !! clean up
      CALL soc_env_release(soc_env)
@@ -1026,6 +1080,10 @@ CONTAINS
      CALL dbcsr_release(dbcsr_ovlp)
      CALL dbcsr_release(dbcsr_tmp)
      CALL dbcsr_release(dbcsr_work)
+     IF (debug_this_module) THEN
+             CALL dbcsr_release(dbcsr_dummy)
+             DEALLOCATE(dbcsr_dummy)
+     END IF
      DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
      DEALLOCATE (coeffs_dist, prod_dist, col_dist, col_blk_size, row_dist_new)
      DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
@@ -1049,6 +1107,8 @@ CONTAINS
                                                              evects_b
          TYPE(mo_set_type), DIMENSION(:), POINTER  :: mos
          TYPE(qs_environment_type), POINTER, INTENT(IN)   :: qs_env
+         TYPE(dft_control_type), POINTER                    :: dft_control
+         TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
          TYPE(qs_kind_type), DIMENSION(:), POINTER        :: qs_kind_set
          TYPE(particle_type), DIMENSION(:), POINTER       :: particle_set
          TYPE(cp_blacs_env_type), POINTER                 :: blacs_env
@@ -1077,16 +1137,20 @@ CONTAINS
          CALL timeset(routineN, handle)
 
          NULLIFY(qs_kind_set, particle_set, blacs_env, para_env,&
-                 a_coeff, b_coeff, grid_info)
+                 a_coeff, b_coeff, grid_info, tddfpt_control)
 
-         do_os = .FALSE.
+        do_os = .FALSE.
          !IF (SIZE(evects_a,1) > 1) do_os=.TRUE.
 
          CALL soc_env_create(soc_env)
          CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set,& 
                         mos=mos, natom=natom, & 
                         particle_set=particle_set, blacs_env=blacs_env, & 
-                        para_env=para_env, matrix_s=matrix_s)
+                        para_env=para_env, matrix_s=matrix_s,&
+                        dft_control=dft_control)
+
+        tddfpt_control => dft_control%tddfpt2_control
+        dipole_form = tddfpt_control%dipole_form 
 
          NULLIFY(soc_section)
          soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
@@ -1111,10 +1175,10 @@ CONTAINS
          END DO
 
          !  Precompute it in the velocity representation, if so chosen
-         IF (dipole_form == tddfpt_soc_dipol_vel) THEN
+         IF (dipole_form == tddfpt_dipole_velocity) THEN
             ! maybe minimum image is not sufficient - > done in XAS to avoid any PBC related issues
             CALL p_xyz_ao(soc_env%dipmat, qs_env, minimum_image=.TRUE.)
-         ELSE
+         ELSE IF (dipole_form == tddfpt_dipole_length) THEN
             DO i = 1, SIZE(particle_set)
                NULLIFY (work)
                rc = particle_set(i)%r
@@ -1125,6 +1189,8 @@ CONTAINS
                END DO
                CALL rRc_xyz_ao(work, qs_env, rc, order=1, minimum_image=.TRUE.)
             END DO
+         ELSE
+                 CPABORT("DIPOLE FORM NOT IMPLEMENTED!")
          END IF
 
          nstates=SIZE(evects_a,2)
@@ -1151,8 +1217,8 @@ CONTAINS
             ALLOCATE(soc_env%orb_soc(i)%matrix)
          end DO
 
-!! Make soc_atom_env for H^SOC calculations
-         !  Compute the contraction coefficients for spherical orbitals
+        !!Make soc_atom_env for H^SOC calculations
+        !  Compute the contraction coefficients for spherical orbitals
          CALL soc_atom_create(soc_atom_env)
          IF (do_os) THEN
             soc_atom_env%nspins=2
@@ -1165,9 +1231,9 @@ CONTAINS
          ALLOCATE(soc_atom_env%harmonics_atom_set(nkind))  
          ALLOCATE (soc_atom_env%orb_sphi_so(nkind))
 
-         !! Prepare the atomic grid we need to calculate the SOC Operator in an Atomic basis
-         !!  copied from init_xas_atom_grid_harmo for convenience
-         
+        !! Prepare the atomic grid we need to calculate the SOC Operator in an Atomic basis
+        !!  copied from init_xas_atom_grid_harmo for convenience
+        
          CALL init_atom_grid(soc_atom_env, grid_info, qs_env)
 
          DO ikind = 1, nkind
@@ -1500,6 +1566,8 @@ CONTAINS
             CALL cp_fm_create(soc_fm, soc_struc )
             CALL copy_dbcsr_to_fm(dbcsr_matrix%matrix, soc_fm)
             CALL cp_fm_write_formatted(soc_fm, ounit, starter)
+            CALL cp_fm_struct_release(soc_struc)
+            CALL cp_fm_release(soc_fm)
            DEALLOCATE(soc_struc)
            DEALLOCATE(soc_fm)
          ELSE IF (print_dbcsr) THEN
@@ -1569,7 +1637,7 @@ SUBROUTINE soc_contract_evect(fm_start, fm_res)
 END SUBROUTINE  soc_contract_evect
 
 SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
-                        soc_evecs_cfm, eps_filter, dipol_form)
+                        soc_evecs_cfm, eps_filter, dipole_form)
       TYPE(qs_environment_type)                     :: qs_env
       TYPE(cp_blacs_env_type), POINTER              :: blacs_env
       TYPE(mp_para_env_type), POINTER            :: para_env
@@ -1580,7 +1648,7 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
       CHARACTER(len=*), PARAMETER                   :: routineN = 'soc_dipole'
       COMPLEX(dp), ALLOCATABLE, DIMENSION(:, :)     :: transdip
       INTEGER                                       :: handle, i, nosc, ntot,&
-                                                       dipol_form
+                                                       dipole_form
       REAL(dp), DIMENSION(:), POINTER               :: osc_str, & 
                                                        soc_evals
       TYPE(cp_cfm_type)                             :: dip_cfm, work1_cfm, work2_cfm
@@ -1648,7 +1716,7 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
       END DO !i
    
       !multiply with appropriate prefac depending in the rep
-      IF (dipol_form == tddfpt_soc_dipol_len) THEN
+      IF (dipole_form == tddfpt_dipole_length) THEN
          osc_str(:) = 2.0_dp/3.0_dp*soc_evals(:)*osc_str(:)
       ELSE
          osc_str(:) = 2.0_dp/3.0_dp/soc_evals(:)*osc_str(:)
@@ -1679,10 +1747,8 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
    TYPE(cp_fm_struct_type), POINTER           :: tmp_struct, &
                                                  full_struct,&
                                                  gsgs_struct,&
-                                                 prod_struct, &
                                                  sggs_struct,&
-                                                 std_struct,&
-                                                 vec_struct
+                                                 std_struct
    TYPE(cp_fm_type)                           :: gs_fm,&
                                                  sggs_fm,&
                                                  tmp_fm,&
@@ -1724,7 +1790,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
    NULLIFY (mos,gs_coeffs)
    NULLIFY (matrix_s)
    NULLIFY (para_env, blacs_env)
-   NULLIFY (full_struct, prod_struct, vec_struct, gsgs_struct, std_struct, tmp_struct, sggs_struct)
+   NULLIFY (full_struct, gsgs_struct, std_struct, tmp_struct, sggs_struct)
    NULLIFY (ao_op_i, ao_op)
    NULLIFY (dbcsr_tp, dbcsr_sg, dbcsr_ovlp, dbcsr_work, dbcsr_tmp, dbcsr_prod)
 
@@ -1943,7 +2009,6 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
       CALL cp_fm_release(tmp_fm)
       CALL cp_fm_release(vec_op)
       CALL cp_fm_release(sggs_fm)
-      CALL cp_fm_struct_release(prod_struct)
       CALL cp_fm_struct_release(full_struct)
       CALL cp_fm_struct_release(tmp_struct)
       CALL cp_fm_struct_release(sggs_struct)

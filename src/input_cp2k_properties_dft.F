@@ -1619,19 +1619,6 @@ CONTAINS
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="DIPOLE_FORM", &
-                          variants=(/"DIP_FORM"/), &
-                          description="Type of integral to get the oscillator strengths "// &
-                          "in the dipole approximation", &
-                          usage="DIPOLE_FORM {string}", &
-                          default_i_val=tddfpt_soc_dipol_vel, &
-                          enum_c_vals=s2a("LENGTH", "VELOCITY"), &
-                          enum_desc=s2a("Length form &lang; 0 | e r | n &rang;", &
-                                        "Velocity form &lang; 0 | d/dr | n &rang;"), &
-                          enum_i_vals=(/tddfpt_soc_dipol_len, tddfpt_soc_dipol_vel/))
-      CALL section_add_keyword(subsection, keyword)
-      CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, __LOCATION__, name="GRID", &
                           variants=(/"ATOMIC_GRID"/), &
                           description="Specification of the atomic angular and radial grids for "// &
@@ -1805,9 +1792,25 @@ CONTAINS
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
 
+      !! SOC PRINT SECTION
       CALL cp_print_key_section_create(print_key, __LOCATION__, name = "SOC_PRINT", &
                       description="Controls the printout of the tddfpt2_soc modul", &
                       print_level = debug_print_level + 1, filename="SOC")
+      CALL keyword_create(keyword, __LOCATION__, name="UNIT_eV", &
+              description="Will detrement if output in eVolt will be printef.", &
+                          default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="UNIT_wn", &
+              description="Will detrement if output in wavenumbers will be printed.", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="SPLITTING", &
+              description="Will add the SOC-Splitting as additional output", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
 
