@@ -58,8 +58,15 @@ MODULE qs_tddfpt2_soc_types
 
 
 !*************************************************************************************************
-! \brief
-! \param
+! \brief: This structure contains the static matrices for the soc-correction
+! \param dbcsr_soc: the ZORA-operator within the ao-basis
+! \param dipmat: the dipole-operator within the ao-basis
+! \paramn evals_a: spin-conservin/singlet excitation energies
+! \param evals_b: spin-filp/triplet exciation energies
+! \param a_coeff: spin-conservin/singlet excitation vector
+! \param b_coeff: spin-filp/triplet exciation vectors
+! \param soc_evals: SOC-Corrected eigenvalues
+! \param soc_osc: ozillatorstrength of soc-corrected excitations
 !*************************************************************************************************
       TYPE soc_env_type
          !! a :: singlett or spin-conservm b :: triplett or spin flip
@@ -74,11 +81,12 @@ MODULE qs_tddfpt2_soc_types
       END TYPE
 
 ! ************************************************************************************************
-! \bief an environment type analog to the xas_atom_env in
-! xas_tdp_types:343  All unused parameters have been droped
+! \bief: an environment type analog to the xas_atom_env in xas_tdp_types:343  
+!        All unused parameters have been droped
+! \param nspins: number of spins
+! \param grid_atom_set: 
+! \param harmonics_atom_set:
 ! \param orb_sphi_so contains the coefficient for direct contraction from so to sgf, for the orb basis
-! \param ri_sphi_so contains the coefficient for direct contraction from
-! so to sgf, for the ri basis. NOT IN USE YET!!! 
 !*************************************************************************************************
       TYPE soc_atom_env_type
          INTEGER                                           :: nspins

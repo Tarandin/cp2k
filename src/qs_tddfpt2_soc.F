@@ -36,6 +36,7 @@ MODULE qs_tddfpt2_soc
    USE cp_fm_pool_types,                ONLY: fm_pool_create_fm
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type, &
                                               cp_fm_struct_create, &
+                                              cp_fm_struct_write_info,&
                                               cp_fm_struct_release
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
@@ -242,6 +243,16 @@ CONTAINS
       
    END SUBROUTINE
 
+   !**********************************************************************************
+   ! \brief: Will perform the soc-calculation within restriced-closed-shell
+   !         This includes the splitting and the oscillator-strength
+   ! \param qs_env: ...
+   ! \param evals_sing: eigenvalues of the singlet excitations
+   ! \param evals_trip: eigenvalues of the triplet excitations
+   ! \param evects_sing: eigenvectors of the singlet exitations
+   ! \param evects_trip: eigenvectors og the triplet excitations
+   !**********************************************************************************
+
    SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,&
                          evals_trip, evects_sing, evects_trip,log_unit)
 
@@ -262,7 +273,7 @@ CONTAINS
                                                    dipole_form       
       TYPE(cp_blacs_env_type), POINTER          :: blacs_env
       TYPE(cp_logger_type), POINTER             :: logger
-      TYPE(mp_para_env_type), POINTER        :: para_env
+      TYPE(mp_para_env_type), POINTER           :: para_env
       TYPE(cp_fm_type)                          :: real_fm,& 
                                                    img_fm
       TYPE(cp_fm_struct_type), POINTER          :: full_struct 
@@ -328,6 +339,7 @@ CONTAINS
       INTEGER                                   :: ii,jj, istate
       LOGICAL                                   :: print_ev, print_wn,&
                                                    print_splitting
+      CHARACTER(len=1)                          :: mult
       
       CALL timeset(routineN, handle)
 
@@ -375,6 +387,21 @@ CONTAINS
       CALL cp_fm_create(img_fm, full_struct)
       CALL cp_fm_set_all(real_fm,0.0_dp)
       CALL cp_fm_set_all(img_fm,0.0_dp)
+
+      !!DEBUG
+        IF (logger%para_env%is_source()) THEN
+         log_unit = cp_print_key_unit_nr(logger,& 
+                                         tddfpt_print_section,&
+                                         "SOC_PRINT", &
+                                         extension=".socme", &
+                                         file_form="FORMATTED", &
+                                         file_action="WRITE", &
+                                         file_status="UNKNOWN")
+          CALL cp_fm_struct_write_info(full_struct, log_unit)
+          !CALL cp_fm_write_formatted(real_fm, log_unit, "REAL")
+      ELSE 
+         log_unit = -1
+      END IF
 
 
       !  Put the excitation energies on the diagonal of the real matrix
@@ -708,6 +735,7 @@ CONTAINS
                               t_firstrow=2, &
                               t_firstcol=1 + nsg + 1)
 
+
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
          CALL dbcsr_copy(dbcsr_dummy,dbcsr_tmp)
@@ -968,6 +996,10 @@ CONTAINS
       CALL section_vals_val_get(soc_print_section, "SPLITTING", l_val=print_splitting)  
 
       IF (log_unit > 0) THEN
+         WRITE(log_unit,'(A,I3,I3)') "NUMBER OF STATES: ",SIZE(real_fm%local_data,1), SIZE(real_fm%local_data,2)
+         WRITE(log_unit, "(A,I3)")      "NUMBER OF TOTAL STATES: ", ntot
+         !CALL cp_fm_write_formatted(real_fm, log_unit, "REAL")
+         !CALL cp_fm_write_formatted(img_fm, log_unit, "IMAG")
          IF (print_ev) THEN
                 WRITE(log_unit,'(A)')  "____________________________________________________"
                 WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
@@ -988,7 +1020,7 @@ CONTAINS
          IF (print_wn) THEN
                  WRITE(log_unit,'(A)')  "____________________________________________________"
                  WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
-                 WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
+                 WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[cm-1]     IMG-PART[cm-1]  "
                  WRITE(log_unit,'(A)')  "____________________________________________________"
                  DO jj = 1,SIZE(real_fm%local_data,2)
                         DO ii = 1,SIZE(real_fm%local_data,1)
@@ -1060,12 +1092,40 @@ CONTAINS
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
       END IF
 
-     ! IF (log_unit > 0 .AND. print_splitting) THEN
-     !         isg = 1
-     !         itp = 1
-     !         tmp = 0.0
-
-     ! END IF
+      !! We may be interested in the splitting of states
+      IF (log_unit > 0 .AND. print_splitting) THEN
+              isg = 1
+              itp = 1
+              iex = 1
+              tmp = 0.0
+              mult = ""
+              WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
+              WRITE(log_unit,'(A)') "                             Splittings                                 "
+              WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
+              WRITE(log_unit,'(A)') "   STATE   MULT     exc.energies[eV]    splittings[eV]                  "
+              WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
+              DO WHILE(iex <= SIZE(soc_env%soc_evals))
+                    IF (evals_sing(isg) < evals_trip(itp) .OR. itp > SIZE(evals_trip) ) THEN
+                            tmp = soc_env%soc_evals(iex) - evals_sing(isg)
+                            mult = "S"
+                            isg = isg + 1
+                    ELSE
+                            tmp = soc_env%soc_evals(iex) - evals_trip(itp)
+                            mult = "T"
+                            itp = itp + 1
+                    END IF
+                    WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F15.10)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                    iex = iex + 1
+                    IF (mult == "T") THEN
+                        DO ii = 1,2
+                                tmp = soc_env%soc_evals(iex) - evals_trip(itp-1)
+                                WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F15.10)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                                iex = iex + 1
+                        END DO
+                    END IF 
+              END DO
+              WRITE(log_unit,'(A)') "------------------------------------------------------------------------"              
+      END IF
 
 !! clean up
      CALL soc_env_release(soc_env)
@@ -1093,10 +1153,15 @@ CONTAINS
    END SUBROUTINE tddfpt_soc_rcs
 
 !******************************************************************************
-! \brief This routine will be handling nessesary initalizations for the
-! soc calcualtions
-!\param
-!
+! \brief: This routine will be handling some nessesary initalizations for the
+!         soc calcualtions
+! \param qs_env: ... 
+! \param soc_atom_env: This type will contain information to calculate the 
+!                      ZORA-operator within the atomic grid
+! \param soc_env: this structure will transfer different matrices realted to 
+!                 the SOC-calculation
+! \param evects_a: Eigenvector of the singlet or spin-conserving excitation
+! \param evects_b: Eigenvector of the triplet or spin-flip excitation
 !******************************************************************************
 
    SUBROUTINE inititialize_soc(qs_env, soc_atom_env, soc_env,&
@@ -1138,10 +1203,12 @@ CONTAINS
 
          NULLIFY(qs_kind_set, particle_set, blacs_env, para_env,&
                  a_coeff, b_coeff, grid_info, tddfpt_control)
-
-        do_os = .FALSE.
+        
+         !! Open_shell is not implemented yet
+         do_os = .FALSE.
          !IF (SIZE(evects_a,1) > 1) do_os=.TRUE.
 
+         !! soc_env will pass most of the larger matrices to the different modules
          CALL soc_env_create(soc_env)
          CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set,& 
                         mos=mos, natom=natom, & 
@@ -1149,12 +1216,14 @@ CONTAINS
                         para_env=para_env, matrix_s=matrix_s,&
                         dft_control=dft_control)
 
+        !! The Dipole form shall be consistent with the tddfpt-module!
         tddfpt_control => dft_control%tddfpt2_control
         dipole_form = tddfpt_control%dipole_form 
 
          NULLIFY(soc_section)
          soc_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%TDDFPT%SOC")
 
+         !! We may want to use a bigger grid then default
          CALL section_vals_val_get(soc_section,"GRID", n_rep_val=nrep)
          ALLOCATE(grid_info(nrep,3))
          DO irep = 1,nrep
@@ -1165,6 +1234,7 @@ CONTAINS
             grid_info(irep,:) = k_list
          END DO
 
+         !! Generate the dipole operator
          ALLOCATE (soc_env%dipmat(3))
          DO i = 1, 3
             ALLOCATE (soc_env%dipmat(i)%matrix)
@@ -1193,6 +1263,8 @@ CONTAINS
                  CPABORT("DIPOLE FORM NOT IMPLEMENTED!")
          END IF
 
+         !! We need to change and create structures for the exitation vectors.
+         !! All excited states shall be written in one matrix, oneafter the other
          nstates=SIZE(evects_a,2)
          nspins=SIZE(evects_a,1)
          DO ispin=1,nspins
@@ -1233,7 +1305,6 @@ CONTAINS
 
         !! Prepare the atomic grid we need to calculate the SOC Operator in an Atomic basis
         !!  copied from init_xas_atom_grid_harmo for convenience
-        
          CALL init_atom_grid(soc_atom_env, grid_info, qs_env)
 
          DO ikind = 1, nkind
@@ -1246,8 +1317,8 @@ CONTAINS
    END SUBROUTINE inititialize_soc
 
 ! **************************************************************************************************
-!> \brief Initializes the atomic grids and harmonics for the RI atomic calculations
-!> \param xas_atom_env ...
+!> \brief Initializes the atomic grids and harmonics for the atomic calculations
+!> \param soc_atom_env ...
 !> \param grid_info ...
 !> \param do_xc Whether the xc kernel will ne computed on the atomic grids. If not, the harmonics
 !>        are built for the orbital basis for all kinds.
@@ -1602,7 +1673,8 @@ END SUBROUTINE print_soc
 ! \brief : Will write the tddft Excitation vectors into a single fm
 !          It was optaint as a nspin x nstat matrix of fms
 ! \param fm_start: a nspin x nstat Matrix of matries
-! 
+! \param fm:res: one output matrix with the dimensions nao x nocc*nspin*nstat
+!******************************************************************************
 
 SUBROUTINE soc_contract_evect(fm_start, fm_res)
 
@@ -1636,11 +1708,24 @@ SUBROUTINE soc_contract_evect(fm_start, fm_res)
     
 END SUBROUTINE  soc_contract_evect
 
+!*********************************************************************************
+! \brief: The osc will be calculated within theis routine using the transition 
+!         dipole moment
+! \param qs_env: ...
+! \param dbcsr_soc_package: Some work matrices for the calculcation
+! \param soc_env: ..
+! \param soc_evects: One result of the eigenwert-problem after the SOC-correction
+! \param eps_filter: 
+! \param dipole form: determents, how the dipole operator was build. Should be the 
+!                     same as in qs_tddfpt_methods!
+!*********************************************************************************
+
+
 SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                         soc_evecs_cfm, eps_filter, dipole_form)
       TYPE(qs_environment_type)                     :: qs_env
       TYPE(cp_blacs_env_type), POINTER              :: blacs_env
-      TYPE(mp_para_env_type), POINTER            :: para_env
+      TYPE(mp_para_env_type), POINTER               :: para_env
       TYPE(soc_env_type), TARGET                    :: soc_env
       TYPE(cp_cfm_type), INTENT(in)                 :: soc_evecs_cfm
       REAL(dp), INTENT(IN)                          :: eps_filter
@@ -1736,6 +1821,15 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
       CALL timestop(handle)
 
 END SUBROUTINE soc_dipol
+
+!**********************************************************************************
+! \brief: This will create the Dipole operator within the amew basis
+! \param amew_op: Output dipole operator
+! \param ao_op: Dipole Operator within the ao basis
+! \param dbcsr_soc_package: Some work matrices
+! \param eps_filter
+! \param qs_env: ...
+!**********************************************************************************
 
 SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env)
 
