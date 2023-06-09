@@ -21,6 +21,7 @@ MODULE qs_tddfpt2_soc_utils
                                               cp_cfm_release,&
                                               cp_cfm_type,&
                                               cp_fm_to_cfm
+   USE cp_control_types,                ONLY: tddfpt2_control_type
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
    USE cp_dbcsr_diag,                   ONLY: cp_dbcsr_power
@@ -54,15 +55,18 @@ MODULE qs_tddfpt2_soc_utils
         dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
         dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print
+        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print, dbcsr_init_p
    USE input_constants,                 ONLY: ot_precond_full_single,&
                                               tddfpt_singlet,&
                                               tddfpt_spin_cons,&
                                               tddfpt_spin_flip,&
                                               tddfpt_triplet,&
-                                              xas_dip_len
+                                              tddfpt_dipole_length,&
+                                              tddfpt_dipole_velocity,&
+                                              tddfpt_dipole_berry
    USE kinds,                           ONLY: dp
    USE mathlib,                         ONLY: get_diag
+   USE moments_utils,                   ONLY: get_reference_point
    USE parallel_gemm_api,               ONLY: parallel_gemm
    USE physcon,                         ONLY: a_fine, wavenumbers
    USE preconditioner_types,            ONLY: destroy_preconditioner,&
@@ -73,7 +77,10 @@ MODULE qs_tddfpt2_soc_utils
    USE qs_mo_methods,                   ONLY: calculate_subspace_eigenvalues
    USE qs_mo_types,                     ONLY: get_mo_set,&
                                               mo_set_type
+   USE qs_operators_ao,                 ONLY: p_xyz_ao,&
+                                              rRc_xyz_ao
    USE qs_ot_eigensolver,               ONLY: ot_eigensolver
+   USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos
    USE xas_tdp_kernel,                  ONLY: kernel_coulomb_xc,&
                                               kernel_exchange
    USE xas_tdp_types,                   ONLY: donor_state_type,&
@@ -92,7 +99,7 @@ MODULE qs_tddfpt2_soc_utils
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'xas_tdp_utils'
 
-   PUBLIC :: rcs_amew_soc_elements 
+   PUBLIC :: rcs_amew_soc_elements, soc_dipole_operator 
 
    !A helper type for SOC
    TYPE dbcsr_soc_package_type
@@ -180,5 +187,66 @@ CONTAINS
       DEALLOCATE(diag)
 
    END SUBROUTINE rcs_amew_soc_elements
+
+   SUBROUTINE soc_dipole_operator(dipmat, tddfpt_control, qs_env)
+           TYPE(dbcsr_p_type),DIMENSION(:),POINTER,INTENT(OUT)  :: dipmat
+           TYPE(tddfpt2_control_type), POINTER, INTENT(IN)      :: tddfpt_control
+           TYPE(qs_environment_type), POINTER, INTENT(IN)       :: qs_env
+
+           CHARACTER(len=*), PARAMETER                          :: routineN= "soc_dipole_operator"
+
+           INTEGER                                              :: handle, nao, nspin, ispin, iao, dim_op, i_dim
+           TYPE(dbcsr_p_type), DIMENSION(:), POINTER            :: matrix_s
+           REAL(kind=dp), DIMENSION(3)                          :: reference_point
+
+           CALL timeset(routineN, handle)
+
+           NULLIFY (matrix_s)
+
+           IF (tddfpt_control%dipole_form == tddfpt_dipole_berry) CPABORT("BERRY DIPOLE FORM NOT IMPLEMENTED FOR SOC")
+
+           !! ONLY RCS have been implemented, Therefore, nspin sould always be 1! 
+           nspin = 1
+           !! Number of dimensions should be 3, unless multipole is implemented in the future
+           dim_op = 3
+
+
+           !! Initzilize the dipmat structure
+           CALL get_qs_env(qs_env, matrix_s=matrix_s)
+           CALL dbcsr_get_info(matrix_s(1)%matrix,nfullrows_total=nao)
+
+           NULLIFY(dipmat)
+           ALLOCATE(dipmat(dim_op))
+           DO i_dim = 1,dim_op
+                ALLOCATE(dipmat(i_dim)%matrix)
+                CALL dbcsr_copy(dipmat(i_dim)%matrix,&
+                                matrix_s(1)%matrix,&
+                                name="dipole operator matrix")
+                CALL dbcsr_set(dipmat(i_dim)%matrix, 0.0_dp) !!This line needs to go for qs_tddfpt_properties like ao_op
+           END DO
+
+           SELECT CASE (tddfpt_control%dipole_form)
+           CASE (tddfpt_dipole_length)
+                   !!This routine is analog to qs_tddfpt_prperties but only until the rRc_xyz_ao routine
+                   !! This will lead to an operator within the nao x nao basis
+                   !! qs_tddpft_properies uses nvirt x nocc
+                   CALL get_reference_point(reference_point, qs_env=qs_env, &
+                                  reference=tddfpt_control%dipole_reference, &
+                                  ref_point=tddfpt_control%dipole_ref_point)
+
+                   CALL rRc_xyz_ao(op=dipmat, qs_env=qs_env, rc=reference_point, order=1, &
+                         minimum_image=.FALSE., soft=.FALSE.)
+          CASE (tddfpt_dipole_velocity)
+                  !!This Routine calcluates the dipole OPerator within the velocity-form within the ao basis
+                  !!This Operation is only used in xas_tdp and qs_tddfpt_soc, lines uses rmc_x_p_xyz_ao
+                  CALL p_xyz_ao(dipmat, qs_env, minimum_image=.FALSE.)
+          CASE DEFAULT
+                  CPABORT("Unimplemented form of the dipole operator")
+          END SELECT
+
+
+          CALL timestop(handle)
+   
+   END SUBROUTINE soc_dipole_operator
 END MODULE qs_tddfpt2_soc_utils
 

@@ -51,7 +51,7 @@ MODULE qs_tddfpt2_properties
    USE dbcsr_api,                       ONLY: &
         dbcsr_copy, dbcsr_get_block_p, dbcsr_get_info, dbcsr_init_p, dbcsr_iterator_blocks_left, &
         dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_p_type, dbcsr_set, dbcsr_type
+        dbcsr_p_type, dbcsr_set, dbcsr_type, dbcsr_print
    USE input_constants,                 ONLY: tddfpt_dipole_berry,&
                                               tddfpt_dipole_length,&
                                               tddfpt_dipole_velocity
@@ -182,6 +182,8 @@ CONTAINS
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(pw_poisson_type), POINTER                     :: poisson_env
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
+      !!DEBUG
+      INTEGER                                            :: log_unit
 
       CALL timeset(routineN, handle)
 
@@ -396,6 +398,15 @@ CONTAINS
 
          CALL rRc_xyz_ao(op=rRc_xyz, qs_env=qs_env, rc=reference_point, order=1, &
                          minimum_image=.FALSE., soft=.FALSE.)
+
+        ! !!DEBUG
+        ! log_unit = cp_logger_get_default_io_unit()
+        ! IF (log_unit > 0) THEN
+        !         WRITE(log_unit,"(A)") "DIPOLE OPERATOR"
+        !         DO ideriv = 1, nderivs
+        !               CALL dbcsr_print(rRc_xyz(ideriv)%matrix,unit_nr=log_unit)
+        !         END DO
+        ! END IF
 
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, context=blacs_env)

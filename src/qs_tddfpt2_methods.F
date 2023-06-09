@@ -21,11 +21,13 @@ MODULE qs_tddfpt2_methods
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
+                                              cp_fm_write_formatted,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
+                                              cp_logger_get_default_unit_nr,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_add_iter_level,&
                                               cp_iterate,&
@@ -169,6 +171,8 @@ CONTAINS
          POINTER                                         :: gs_mos
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
       TYPE(tddfpt_work_matrices)                         :: work_matrices
+      !!DEBUG
+      INTEGER                                            :: ii
       
       CALL timeset(routineN, handle)
 
@@ -930,7 +934,7 @@ CONTAINS
       nstate_max = nocc * nvirt
       IF (nstates > nstate_max) THEN
          CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
-         CPWARN("CHANGED NSTATES TO ITS MAXIMUM VALUE!")
+         CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
          nstates = nstate_max
       END IF
 
@@ -1202,6 +1206,9 @@ CONTAINS
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
          IF (tddfpt_control%do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
          CALL release_kernel_env(kernel_env%full_kernel)
+         CALL tddfpt_release_work_matrices(work_matrices, sub_env)
+         CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates,  tddfpt_control%do_hfx, tddfpt_control%do_admm,&
+                                          tddfpt_control%do_exck,qs_env, sub_env)
       END IF
 
       tddfpt_control%rks_triplets = lmult_tmp
@@ -1227,7 +1234,6 @@ CONTAINS
         END IF !log_unit
         mult=1
        END IF
-
 
    CALL tddfpt_energies(qs_env, nstates, work_matrices, tddfpt_control, logger, &
                             tddfpt_print_section, evects,evals, &

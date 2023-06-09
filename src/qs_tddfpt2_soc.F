@@ -40,6 +40,7 @@ MODULE qs_tddfpt2_soc
                                               cp_fm_struct_release
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
+                                              cp_fm_write_info,&
                                               cp_fm_release,&
                                               cp_fm_get_diag,&
                                               cp_fm_to_fm,&
@@ -123,7 +124,8 @@ MODULE qs_tddfpt2_soc
                                              calculate_density_coeffs,&
                                              compute_sphi_so, &
                                              truncate_radial_grid
-   USE qs_tddfpt2_soc_utils,           ONLY: rcs_amew_soc_elements
+   USE qs_tddfpt2_soc_utils,           ONLY: rcs_amew_soc_elements,&
+                                             soc_dipole_operator
    USE lebedev,                        ONLY: deallocate_lebedev_grids,&
                                              get_number_of_lebedev_grid,&
                                              init_lebedev_grids,&
@@ -152,7 +154,7 @@ MODULE qs_tddfpt2_soc
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt2_soc'
 
-   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .FALSE.
+   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
 
    INTEGER, PARAMETER, PRIVATE          :: nderivs = 3
    INTEGER, PARAMETER, PRIVATE          :: maxspins = 2
@@ -191,7 +193,6 @@ CONTAINS
                                                           evals_b
       TYPE(cp_fm_type),DIMENSION(:,:), INTENT(IN)      :: evects_a, &
                                                           evects_b
-
       CHARACTER(LEN=*), PARAMETER                      :: routineN="tddfpt_soc"
 
       INTEGER                                          :: handle,&
@@ -253,8 +254,7 @@ CONTAINS
    ! \param evects_trip: eigenvectors og the triplet excitations
    !**********************************************************************************
 
-   SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,&
-                         evals_trip, evects_sing, evects_trip,log_unit)
+   SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,evals_trip, evects_sing,evects_trip,log_unit)
 
       TYPE(qs_environment_type), POINTER        :: qs_env
       CHARACTER(LEN=*), PARAMETER               :: routineN ="tddfpt_soc_rcs"
@@ -361,7 +361,7 @@ CONTAINS
 
 ! Initzialize Working envirment
       CALL inititialize_soc(qs_env, soc_atom_env, soc_env, & 
-                            evects_sing, evects_trip, dipole_form)
+                            evects_sing, evects_trip,dipole_form)
 
       NULLIFY(mos)
       CALL get_qs_env(qs_env, mos=mos, para_env=para_env, blacs_env=blacs_env)
@@ -387,22 +387,6 @@ CONTAINS
       CALL cp_fm_create(img_fm, full_struct)
       CALL cp_fm_set_all(real_fm,0.0_dp)
       CALL cp_fm_set_all(img_fm,0.0_dp)
-
-      !!DEBUG
-        IF (logger%para_env%is_source()) THEN
-         log_unit = cp_print_key_unit_nr(logger,& 
-                                         tddfpt_print_section,&
-                                         "SOC_PRINT", &
-                                         extension=".socme", &
-                                         file_form="FORMATTED", &
-                                         file_action="WRITE", &
-                                         file_status="UNKNOWN")
-          CALL cp_fm_struct_write_info(full_struct, log_unit)
-          !CALL cp_fm_write_formatted(real_fm, log_unit, "REAL")
-      ELSE 
-         log_unit = -1
-      END IF
-
 
       !  Put the excitation energies on the diagonal of the real matrix
       DO isg = 1, nsg
@@ -560,9 +544,9 @@ CONTAINS
          diag(:) = get_diag(gstp_block)
          soc_gst = SUM(diag)
          !!  <0|H_x|T^-1>
-         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + itp, -1_dp*soc_gst) 
+         !CALL cp_fm_set_element(img_fm, 1, 1 + nsg + itp, -1_dp*soc_gst) 
          !! <0|H_x|T^+1>
-         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst) 
+         !CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst) 
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -583,9 +567,9 @@ CONTAINS
          diag(:) = get_diag(gstp_block)
          soc_gst = SUM(diag)
          ! <0|H_y|T^-1>
-         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + itp, -1.0_dp*soc_gst) 
+!         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + itp, -1.0_dp*soc_gst) 
          ! <0|H_y|T^+1>
-         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + 2*ntp + itp, -1.0_dp*soc_gst) 
+!         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + 2*ntp + itp, -1.0_dp*soc_gst) 
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -609,7 +593,7 @@ CONTAINS
                                   n_cols=nactive)
          diag(:) = get_diag(gstp_block)
          soc_gst = sqrt2*SUM(diag)
-         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
+!         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -671,14 +655,14 @@ CONTAINS
       !<S|H_x|T^-1>
       !! Convert to fm for transfer to img_fm
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=2, &
-                              t_firstcol=1 + nsg + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=2, &
+!                              t_firstcol=1 + nsg + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
@@ -689,14 +673,14 @@ CONTAINS
 
       !<S|H_x|T^+1> takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=2, &
-                              t_firstcol=1 + nsg + 2*ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=2, &
+!                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
@@ -726,14 +710,14 @@ CONTAINS
 
       !<S|H_y|T^-1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=real_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=2, &
-                              t_firstcol=1 + nsg + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=real_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=2, &
+!                              t_firstcol=1 + nsg + 1)
 
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -744,14 +728,14 @@ CONTAINS
       ENDIF
 
       !<S|H_y|T^+1>
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=real_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=2, &
-                              t_firstcol=1 + nsg + 2*ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=real_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=2, &
+!                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
@@ -779,14 +763,14 @@ CONTAINS
 
       !<S|H_z|T^0>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=2, &
-                              t_firstcol=1 + nsg + ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=2, &
+!                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^0> in Hartree / cm^-1"
@@ -826,14 +810,14 @@ CONTAINS
 
    !   !<T^0|H_x|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=1 + nsg + ntp + 1, &
-                              t_firstcol=1 + nsg + 2*ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=1 + nsg + ntp + 1, &
+!                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -845,14 +829,14 @@ CONTAINS
       !<T^-1|H_x|T^0>, takes a minus sign and a transpose (because computed <T^0|H_x|T^-1>)
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
-      CALL cp_fm_to_fm_submat(msource=work_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=1 + nsg + 1, &
-                              t_firstcol=1 + nsg + ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=work_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=1 + nsg + 1, &
+!                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^0> in Hartree / cm^-1"
@@ -880,13 +864,13 @@ CONTAINS
 
       !<T^0|H_y|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=real_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1, t_firstrow=1 + nsg + ntp + 1, &
-                              t_firstcol=1 + nsg + 2*ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=real_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1, t_firstrow=1 + nsg + ntp + 1, &
+!                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -898,13 +882,13 @@ CONTAINS
       !<T^-1|H_y|T^0>, takes a minus sign and a transpose
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
-      CALL cp_fm_to_fm_submat(msource=work_fm,&
-                              mtarget=real_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1, t_firstrow=1 + nsg + 1, &
-                              t_firstcol=1 + nsg + ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=work_fm,&
+!                              mtarget=real_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1, t_firstrow=1 + nsg + 1, &
+!                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -932,14 +916,14 @@ CONTAINS
 
       !<T^+1|H_z|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=1 + nsg + 2*ntp + 1, &
-                              t_firstcol=1 + nsg + 2*ntp + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=1 + nsg + 2*ntp + 1, &
+!                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^+1|H_x|T^+1> in Hartree / cm^-1"
@@ -950,14 +934,14 @@ CONTAINS
 
       !<T^-1|H_z|T^-1>, takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
-      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-                              mtarget=img_fm,&
-                              nrow=nex,&
-                              ncol=nex, &
-                              s_firstrow=1,&
-                              s_firstcol=1,&
-                              t_firstrow=1 + nsg + 1, &
-                              t_firstcol=1 + nsg + 1)
+!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+!                              mtarget=img_fm,&
+!                              nrow=nex,&
+!                              ncol=nex, &
+!                              s_firstrow=1,&
+!                              s_firstcol=1,&
+!                              t_firstrow=1 + nsg + 1, &
+!                              t_firstcol=1 + nsg + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^-1> in Hartree / cm^-1"
@@ -995,11 +979,11 @@ CONTAINS
       CALL section_vals_val_get(soc_print_section, "UNIT_wn", l_val=print_wn)
       CALL section_vals_val_get(soc_print_section, "SPLITTING", l_val=print_splitting)  
 
+      !! This needs something to deal with a parallel run
+      !! This output will be needed for NEWTONX for ISC!!
       IF (log_unit > 0) THEN
          WRITE(log_unit,'(A,I3,I3)') "NUMBER OF STATES: ",SIZE(real_fm%local_data,1), SIZE(real_fm%local_data,2)
          WRITE(log_unit, "(A,I3)")      "NUMBER OF TOTAL STATES: ", ntot
-         !CALL cp_fm_write_formatted(real_fm, log_unit, "REAL")
-         !CALL cp_fm_write_formatted(img_fm, log_unit, "IMAG")
          IF (print_ev) THEN
                 WRITE(log_unit,'(A)')  "____________________________________________________"
                 WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
@@ -1034,7 +1018,6 @@ CONTAINS
                  WRITE(log_unit,'(A)')  "____________________________________________________"
          END IF
       END IF
-      !!END DEBUG
 
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
@@ -1065,7 +1048,12 @@ CONTAINS
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
                      evecs_cfm, eps_filter, dipole_form)
 
+
    !Create final output
+   !! Output unit is choosen by the keyword "UNIT_eV" and "UNIT_wn" in "SOC_PRINT" section
+   !! TODO:: evolt or wavenumbers written into REAL "unit", so only one line needs to be doubled
+   !! Drawback:: only one unit could be printed at a time...
+   !! TODO:: The output-code is getting a little long. Time to move it to a different routine!
       IF (logger%para_env%is_source()) THEN
          log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
       ELSE
@@ -1079,7 +1067,7 @@ CONTAINS
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F20.10)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
          END DO
       END IF
       IF (log_unit > 0 .AND. print_wn) THEN
@@ -1087,13 +1075,14 @@ CONTAINS
          WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [cm^-1]  Oscillator strengths [a.u.]"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F20.10)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F15.5)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
          END DO
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
       END IF
 
       !! We may be interested in the splitting of states
-      IF (log_unit > 0 .AND. print_splitting) THEN
+      !! Activated with the "SPLITTING" keyword in "SOC_PRINT" section
+      IF (log_unit > 0 .AND. (print_splitting .OR. debug_this_module)) THEN
               isg = 1
               itp = 1
               iex = 1
@@ -1114,12 +1103,12 @@ CONTAINS
                             mult = "T"
                             itp = itp + 1
                     END IF
-                    WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F15.10)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                    WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F13.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
                     iex = iex + 1
                     IF (mult == "T") THEN
                         DO ii = 1,2
                                 tmp = soc_env%soc_evals(iex) - evals_trip(itp-1)
-                                WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F15.10)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                                WRITE(log_unit,'(3X,I3,7X,A,7X,F13.8,7X,F13.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
                                 iex = iex + 1
                         END DO
                     END IF 
@@ -1170,7 +1159,7 @@ CONTAINS
          !! Different Types 
          TYPE(cp_fm_type),DIMENSION(:,:), INTENT(IN)       ::evects_a,&
                                                              evects_b
-         TYPE(mo_set_type), DIMENSION(:), POINTER  :: mos
+         TYPE(mo_set_type), DIMENSION(:), POINTER         :: mos
          TYPE(qs_environment_type), POINTER, INTENT(IN)   :: qs_env
          TYPE(dft_control_type), POINTER                    :: dft_control
          TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
@@ -1234,34 +1223,36 @@ CONTAINS
             grid_info(irep,:) = k_list
          END DO
 
-         !! Generate the dipole operator
-         ALLOCATE (soc_env%dipmat(3))
-         DO i = 1, 3
-            ALLOCATE (soc_env%dipmat(i)%matrix)
-            CALL dbcsr_copy(soc_env%dipmat(i)%matrix,&
-                             matrix_s(1)%matrix,&
-                             name="dipole matrix")
-            CALL dbcsr_set(soc_env%dipmat(i)%matrix, 0.0_dp)
-         END DO
+         CALL soc_dipole_operator(soc_env%dipmat, tddfpt_control, qs_env)
 
-         !  Precompute it in the velocity representation, if so chosen
-         IF (dipole_form == tddfpt_dipole_velocity) THEN
-            ! maybe minimum image is not sufficient - > done in XAS to avoid any PBC related issues
-            CALL p_xyz_ao(soc_env%dipmat, qs_env, minimum_image=.TRUE.)
-         ELSE IF (dipole_form == tddfpt_dipole_length) THEN
-            DO i = 1, SIZE(particle_set)
-               NULLIFY (work)
-               rc = particle_set(i)%r
-               ALLOCATE (work(9))     !! Three Dimensions x,y,z, 9 if there would be needed for quadropole
-               DO j = 1,3
-                  CALL dbcsr_set(soc_env%dipmat(j)%matrix, 0.0_dp)
-                  work(j)%matrix => soc_env%dipmat(j)%matrix
-               END DO
-               CALL rRc_xyz_ao(work, qs_env, rc, order=1, minimum_image=.TRUE.)
-            END DO
-         ELSE
-                 CPABORT("DIPOLE FORM NOT IMPLEMENTED!")
-         END IF
+!         !! Generate the dipole operator
+!         ALLOCATE (soc_env%dipmat(3))
+!         DO i = 1, 3
+!            ALLOCATE (soc_env%dipmat(i)%matrix)
+!            CALL dbcsr_copy(soc_env%dipmat(i)%matrix,&
+!                             matrix_s(1)%matrix,&
+!                             name="dipole matrix")
+!            CALL dbcsr_set(soc_env%dipmat(i)%matrix, 0.0_dp)
+!         END DO
+!
+!         !  Precompute it in the velocity representation, if so chosen
+!         IF (dipole_form == tddfpt_dipole_velocity) THEN
+!            ! maybe minimum image is not sufficient - > done in XAS to avoid any PBC related issues
+!            CALL p_xyz_ao(soc_env%dipmat, qs_env, minimum_image=.TRUE.)
+!         ELSE IF (dipole_form == tddfpt_dipole_length) THEN
+!            DO i = 1, SIZE(particle_set)
+!               NULLIFY (work)
+!               rc = particle_set(i)%r
+!               ALLOCATE (work(9))     !! Three Dimensions x,y,z, 9 if there would be needed for quadropole
+!               DO j = 1,3
+!                  CALL dbcsr_set(soc_env%dipmat(j)%matrix, 0.0_dp)
+!                  work(j)%matrix => soc_env%dipmat(j)%matrix
+!               END DO
+!               CALL rRc_xyz_ao(work, qs_env, rc, order=1, minimum_image=.TRUE.)
+!            END DO
+!         ELSE
+!                 CPABORT("DIPOLE FORM NOT IMPLEMENTED!")
+!         END IF
 
          !! We need to change and create structures for the exitation vectors.
          !! All excited states shall be written in one matrix, oneafter the other
@@ -1795,8 +1786,7 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
          CALL cp_cfm_get_submatrix(dip_cfm, transdip)
    
          !transition dipoles are real numbers
-         osc_str(:) = osc_str(:) + REAL(transdip(2:ntot, 1))**2 
-         osc_str(:) = osc_str(:) + AIMAG(transdip(2:ntot, 1))**2
+         osc_str(:) = osc_str(:) + REAL(transdip(2:ntot, 1))**2 + AIMAG(transdip(2:ntot, 1))**2
    
       END DO !i
    
@@ -1875,9 +1865,22 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                                  sggs_block
    REAL(dp), INTENT(IN)                       :: eps_filter
    TYPE(cp_blacs_env_type), POINTER           :: blacs_env
-   TYPE(mp_para_env_type), POINTER         :: para_env
+   TYPE(mp_para_env_type), POINTER            :: para_env
    INTEGER                                    :: handle
    CHARACTER(len=*), PARAMETER                :: routineN = "get_rcs_amew_op"
+   !!DEBUG
+   TYPE(cp_logger_type),POINTER               :: logger
+   INTEGER                                    :: log_unit
+
+   NULLIFY(logger)
+   logger => cp_get_default_logger()
+   IF (logger%para_env%is_source() .AND. debug_this_module) THEN
+           log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+   ELSE
+           log_unit = -1
+   END IF
+
+   !!END DEBUG
 
    CALL timeset(routineN, handle)
 
@@ -1915,7 +1918,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
       END DO !i
 
 !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
-      CALL get_mo_set(mos(1), mo_coeff=gs_coeffs, nao=nao, nmo=nactive)
+      CALL get_mo_set(mos(1), mo_coeff=gs_coeffs, nao=nao, homo=nactive)
       CALL cp_fm_get_info(gs_coeffs, matrix_struct=std_struct)
 
       CALL cp_fm_struct_create(gsgs_struct,&
@@ -1937,9 +1940,17 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                             1.0_dp, gs_coeffs,work_fm, 0.0_dp, gs_fm)
          CALL cp_fm_get_diag(gs_fm, gs_diag)
          gsgs_op(i) = 2.0_dp*SUM(gs_diag)
+         IF (log_unit > 0) THEN
+                 WRITE(log_unit, '(A,F15.10)') "GS|GS contribution: ",gsgs_op(i)
+         END IF
 
       END DO !i
       DEALLOCATE (gs_diag)
+
+      IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "gs_coeff"
+             CALL cp_fm_write_formatted(gs_coeffs,log_unit)
+      END IF 
 
       CALL cp_fm_release(work_fm)
 
@@ -1966,6 +1977,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
 ! Note: operator matrices are asusmed symmetric, can only do upper half
       DO i = 1, dim_op
 
+
          ao_op_i => ao_op(i)%matrix
 
          ! The GS-GS contribution
@@ -1987,9 +1999,22 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                      n_cols=nactive)
             diag(:) = get_diag(sggs_block)
             op = sqrt2*SUM(diag)
+            !!DEBUG
+            IF (log_unit > 0) THEN
+                    WRITE(log_unit,'(A)') "sggs_fm"
+                    CALL cp_fm_write_formatted(sggs_fm,log_unit)
+                    WRITE(log_unit, '(A,I3,A,I3,A,F16.10)') "SGGS contribution ",i, "with states ",isg,": ",op
+            END IF
+
             CALL cp_fm_set_element(amew_op(i), 1, 1 + isg, op)
          END DO
 
+         IF (log_unit > 0) THEN
+                 WRITE(log_unit,'(A)') "vec_op"
+                    CALL cp_fm_write_formatted(vec_op,log_unit)
+                    WRITE(log_unit,'(A)') "mo_op"
+                    CALL cp_fm_write_formatted(gs_fm,log_unit)
+         END IF
          ! do the singlet-singlet components
          !start with the overlap
          CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -2019,7 +2044,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                     pref_trace=-1.0_dp, &
                                     pref_overall=1.0_dp,&
                                     pref_diags=gsgs_op(i),&
-                                    symmetric=.TRUE.)
+                                    symmetric=.FALSE.)  !!FOR DEBUG
 
          CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
          CALL cp_fm_to_fm_submat(msource=tmp_fm,&
@@ -2060,7 +2085,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                     pref_trace=-1.0_dp, &
                                     pref_overall=1.0_dp,&
                                     pref_diags=gsgs_op(i),&
-                                    symmetric=.TRUE.)
+                                    symmetric=.FALSE.)  !!FOR DEBUG
 
          CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
          !<T^-1|op|T^-1>
@@ -2082,7 +2107,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                  s_firstcol=1,&
                                  t_firstrow=1 + nsg + ntp + 1, &
                                  t_firstcol=1 + nsg + ntp + 1)
-         !<T^-1|op|T^-1>
+         !<T^+1|op|T^+1>
          CALL cp_fm_to_fm_submat(msource=tmp_fm,&
                                  mtarget=amew_op(i),&
                                  nrow=nex,&
@@ -2091,6 +2116,13 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                  s_firstcol=1,&
                                  t_firstrow=1 + nsg + 2*ntp + 1, &
                                  t_firstcol=1 + nsg + 2*ntp + 1)
+
+         IF (log_unit > 0) THEN
+                 WRITE(log_unit,'(A,I3)') "amew-operator: ", i
+                 CALL cp_fm_write_info(amew_op(i), log_unit)
+                 CALL cp_fm_write_formatted(amew_op(i), log_unit)
+         END IF
+
 
          ! Symmetrize the matrix (only upper triangle built)
          CALL cp_fm_upper_to_full(amew_op(i), work_fm)
