@@ -13,6 +13,12 @@
 ! **************************************************************************************************
 
 MODULE qs_tddfpt2_soc_utils
+   USE ao_util,                         ONLY: exp_radius
+   USE atomic_kind_types,               ONLY: atomic_kind_type,&
+                                              get_atomic_kind,&
+                                              get_atomic_kind_set
+   USE cell_types,                      ONLY: cell_type,&
+                                              pbc
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_cfm_diag,                     ONLY: cp_cfm_heevd
    USE cp_cfm_types,                    ONLY: cp_cfm_create,&
@@ -21,7 +27,9 @@ MODULE qs_tddfpt2_soc_utils
                                               cp_cfm_release,&
                                               cp_cfm_type,&
                                               cp_fm_to_cfm
-   USE cp_control_types,                ONLY: tddfpt2_control_type
+   USE cp_control_types,                ONLY: tddfpt2_control_type,&
+                                               dft_control_type,&
+                                               qs_control_type
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
    USE cp_dbcsr_diag,                   ONLY: cp_dbcsr_power
@@ -56,6 +64,14 @@ MODULE qs_tddfpt2_soc_utils
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
         dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, &
         dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_print, dbcsr_init_p
+   USE external_potential_types,        ONLY: gth_potential_type,&
+                                              get_potential
+   USE grid_api,                        ONLY: &
+        GRID_FUNC_AB, GRID_FUNC_CORE_X, GRID_FUNC_CORE_Y, GRID_FUNC_CORE_Z, GRID_FUNC_DAB_X, &
+        GRID_FUNC_DAB_Y, GRID_FUNC_DAB_Z, GRID_FUNC_DABpADB_X, GRID_FUNC_DABpADB_Y, &
+        GRID_FUNC_DABpADB_Z, GRID_FUNC_DADB, GRID_FUNC_DX, GRID_FUNC_DXDX, GRID_FUNC_DXDY, &
+        GRID_FUNC_DY, GRID_FUNC_DYDY, GRID_FUNC_DYDZ, GRID_FUNC_DZ, GRID_FUNC_DZDX, &
+        GRID_FUNC_DZDZ, collocate_pgf_product, grid_collocate_task_list
    USE input_constants,                 ONLY: ot_precond_full_single,&
                                               tddfpt_singlet,&
                                               tddfpt_spin_cons,&
@@ -66,14 +82,40 @@ MODULE qs_tddfpt2_soc_utils
                                               tddfpt_dipole_berry
    USE kinds,                           ONLY: dp
    USE mathlib,                         ONLY: get_diag
+   USE message_passing,                 ONLY: mp_para_env_type  
+   USE memory_utilities,                ONLY: reallocate
    USE moments_utils,                   ONLY: get_reference_point
+   USE orbital_pointers,                ONLY: coset,&
+                                              ncoset
    USE parallel_gemm_api,               ONLY: parallel_gemm
+   USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: a_fine, wavenumbers
    USE preconditioner_types,            ONLY: destroy_preconditioner,&
                                               init_preconditioner,&
                                               preconditioner_type
+    USE pw_env_types,                    ONLY: pw_env_get,&
+                                              pw_env_type
+    USE pw_methods,                      ONLY: pw_axpy,&
+                                              pw_integrate_function,&
+                                              pw_transfer,&
+                                              pw_zero
+
+   USE pw_types,                        ONLY: pw_type,&
+                                              REALDATA3D,&
+                                              pw_create
+   USE pw_grid_types,                   ONLY: pw_grid_type
+   USE pw_grids,                        ONLY: pw_grid_create
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_p_type,&
+                                              pw_pool_type,&
+                                              pw_pools_create_pws,&
+                                              pw_pools_give_back_pws
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
+   USE qs_kind_types,                   ONLY: get_qs_kind,&
+                                              get_qs_kind_set,&
+                                              qs_kind_type
    USE qs_mo_methods,                   ONLY: calculate_subspace_eigenvalues
    USE qs_mo_types,                     ONLY: get_mo_set,&
                                               mo_set_type
@@ -81,6 +123,15 @@ MODULE qs_tddfpt2_soc_utils
                                               rRc_xyz_ao
    USE qs_ot_eigensolver,               ONLY: ot_eigensolver
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos
+   USE qs_tddfpt2_soc_types,            ONLY: soc_atom_env_type
+   USE realspace_grid_types,            ONLY: map_gaussian_here,&
+                                              realspace_grid_desc_p_type,&
+                                              realspace_grid_type,&
+                                              rs2pw,&
+                                              rs_grid_zero,&
+                                              rs_pw_transfer
+   USE rs_pw_interface,                 ONLY: density_rs2pw,&
+                                              density_rs2pw_basic
    USE xas_tdp_kernel,                  ONLY: kernel_coulomb_xc,&
                                               kernel_exchange
    USE xas_tdp_types,                   ONLY: donor_state_type,&
@@ -99,7 +150,7 @@ MODULE qs_tddfpt2_soc_utils
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'xas_tdp_utils'
 
-   PUBLIC :: rcs_amew_soc_elements, soc_dipole_operator 
+   PUBLIC :: rcs_amew_soc_elements, soc_dipole_operator, atomic_pseudopotential 
 
    !A helper type for SOC
    TYPE dbcsr_soc_package_type
@@ -190,7 +241,7 @@ CONTAINS
 
    SUBROUTINE soc_dipole_operator(dipmat, tddfpt_control, qs_env)
            TYPE(dbcsr_p_type),DIMENSION(:),POINTER,INTENT(OUT)  :: dipmat
-           TYPE(tddfpt2_control_type), POINTER, INTENT(IN)      :: tddfpt_control
+           TYPE(tddfpt2_control_type), POINTER      :: tddfpt_control
            TYPE(qs_environment_type), POINTER, INTENT(IN)       :: qs_env
 
            CHARACTER(len=*), PARAMETER                          :: routineN= "soc_dipole_operator"
@@ -222,7 +273,7 @@ CONTAINS
                 CALL dbcsr_copy(dipmat(i_dim)%matrix,&
                                 matrix_s(1)%matrix,&
                                 name="dipole operator matrix")
-                CALL dbcsr_set(dipmat(i_dim)%matrix, 0.0_dp) !!This line needs to go for qs_tddfpt_properties like ao_op
+                !CALL dbcsr_set(dipmat(i_dim)%matrix, 0.0_dp) !!This line needs to go for qs_tddfpt_properties like ao_op
            END DO
 
            SELECT CASE (tddfpt_control%dipole_form)
@@ -248,5 +299,142 @@ CONTAINS
           CALL timestop(handle)
    
    END SUBROUTINE soc_dipole_operator
-END MODULE qs_tddfpt2_soc_utils
 
+   SUBROUTINE atomic_pseudopotential(soc_atom_env, qs_env)
+           TYPE(qs_environment_type), POINTER, INTENT(IN)     :: qs_env
+           TYPE(soc_atom_env_type)                            :: soc_atom_env
+           TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+           TYPE(gth_potential_type), POINTER                  :: gth_potential
+           TYPE(dft_control_type), POINTER                    :: dft_control
+           TYPE(qs_control_type), POINTER                     :: qs_control
+           CHARACTER(len=*), PARAMETER                        :: routineN="atomic_pseudopotential"
+           INTEGER                                            :: nkind, ikind, handel, nexp, max_grid, nppnl
+
+           CALL timeset(routineN, handel)
+
+           NULLIFY(qs_kind_set, dft_control, qs_control)
+
+           CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set, dft_control=dft_control)
+           qs_control => dft_control%qs_control
+           nkind = SIZE(qs_kind_set)
+
+           !! Different Atom kinds may have different grid sizes => the array needs to fit the largest grid
+           max_grid = 0
+           DO ikind= 1,nkind
+                IF (soc_atom_env%grid_atom_set(ikind)%grid_atom%nr > max_grid) THEN
+                        max_grid = soc_atom_env%grid_atom_set(ikind)%grid_atom%nr
+                END IF
+           END DO !ikind
+
+           ALLOCATE(soc_atom_env%vppl(nkind, max_grid),soc_atom_env%vppnl(nkind, max_grid))
+
+           DO ikind = 1, nkind
+                CALL get_qs_kind(qs_kind_set(ikind),gth_potential=gth_potential)
+                IF (ASSOCIATED(gth_potential)) THEN
+                        CALL get_potential(potential=gth_potential,nexp_ppl=nexp, nppnl=nppnl)
+                        IF (nexp > 0) THEN
+                                CALL atomic_vppl(soc_atom_env, gth_potential,ikind, qs_control)
+                        END IF !do_ppl
+                        IF (nppnl > 0) THEN
+                                CALL atomic_ppnl(soc_atom_env, gth_potential,ikind, qs_control)
+                        END IF !do_vppnl
+                END IF !gth_potential
+           END DO !ikind
+
+           CALL timestop(handel)
+
+   END SUBROUTINE atomic_pseudopotential
+
+   SUBROUTINE atomic_vppl(soc_atom_env,gth_potential,ikind, qs_control)
+           TYPE(soc_atom_env_type),TARGET                     :: soc_atom_env
+           TYPE(gth_potential_type), POINTER                  :: gth_potential
+           INTEGER, INTENT(IN)                                :: ikind
+           TYPE(qs_control_type), POINTER                     :: qs_control
+           REAL(KIND=dp)                                      :: alpha_ppl, cerf_ppl, ppl_radius
+           REAL(KIND=dp), DIMENSION(:), POINTER               :: cexp_ppl
+           REAL(KIND=dp), DIMENSION(:), POINTER               :: vppl
+           REAL(KIND=dp)                                      :: z
+           REAL(KIND=dp), DIMENSION(:), POINTER               :: rr, rc
+           INTEGER                                            :: nex_ppl, nr, iexp, lppl
+           INTEGER            :: log_unit
+           TYPE(cp_logger_type), POINTER:: logger
+
+           logger =>cp_get_default_logger()
+           IF (logger%para_env%is_source()) THEN
+                log_unit = cp_logger_get_default_io_unit()
+           ELSE
+                  log_unit = -1
+          END IF 
+
+           CALL get_potential(potential=gth_potential,zeff=z,& 
+                              alpha_ppl=alpha_ppl,nexp_ppl=nex_ppl,cexp_ppl=cexp_ppl,&
+                              cerf_ppl=cerf_ppl)
+
+           nr = soc_atom_env%grid_atom_set(ikind)%grid_atom%nr
+           rr => soc_atom_env%grid_atom_set(ikind)%grid_atom%rad
+           
+           IF (log_unit > 0) WRITE(log_unit, '(A,F5.3)') "Z = ", z
+           
+           vppl => soc_atom_env%vppl(ikind,:)
+           vppl = 0.0_dp
+
+           ALLOCATE(rc(nr))
+           ppl_radius = 0.0_dp
+           DO iexp = 1,nex_ppl
+                lppl = 2*(iexp-1)
+                ppl_radius= MAX(ppl_radius, exp_radius(lppl, alpha_ppl, qs_control%eps_ppl, cerf_ppl))
+           END DO
+           rc(:) = rr(:)/ppl_radius  !*sqrt(alpha_ppl/2.0_dp)
+
+           DO iexp = 1,nex_ppl
+                vppl(1:nr) = vppl(1:nr) + cexp_ppl(iexp) * rr**((iexp-1)*2)
+           END DO
+
+           vppl(1:nr) = vppl(1:nr) * exp(-1/2 * rc*rc) - cerf_ppl * rr(:)**2
+
+
+   END SUBROUTINE atomic_vppl
+
+   ! **************************************************************************************************
+!> \brief computes the density of the non-linear core correction on the grid.
+! **************************************************************************************************
+   SUBROUTINE atomic_ppnl(soc_atom_env, gth_potential, ikind, qs_control)
+           TYPE(soc_atom_env_type), TARGET                    :: soc_atom_env
+           TYPE(gth_potential_type), POINTER                  :: gth_potential
+           INTEGER, INTENT(IN)                                :: ikind
+           TYPE(qs_control_type), POINTER                     :: qs_control
+
+           INTEGER, DIMENSION(:), POINTER                     :: nprj_ppnl
+           !REAL(dp)                                           :: 
+           REAL(KIND=dp), DIMENSION(:), POINTER               :: rc, fe, rr, alpha_ppnl, vppnl, ppnl_radius
+           REAL(KIND=dp), DIMENSION(:,:), POINTER             :: cprj_ppnl
+           REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: hprj_ppnl => NULL()
+
+           INTEGER                                            :: nr, i, l, n_nl, nppnl, iprj_ppnl, lppnl, lprj_ppnl
+
+           NULLIFY(vppnl, rr, fe, rc, hprj_ppnl, nprj_ppnl)
+           CALL get_potential(potential=gth_potential, nppnl=nppnl, alpha_ppnl=alpha_ppnl, nprj_ppnl=nprj_ppnl,&
+                              lppnl=lppnl,cprj_ppnl=cprj_ppnl)
+
+           nr = soc_atom_env%grid_atom_set(ikind)%grid_atom%nr
+           rr => soc_atom_env%grid_atom_set(ikind)%grid_atom%rad
+           vppnl => soc_atom_env%vppnl(ikind,:)
+           vppnl = 0.0_dp
+
+           ALLOCATE(ppnl_radius(lppnl))
+           ppnl_radius(lppnl) = 0.0_dp
+
+           DO l = 1, lppnl
+                DO iprj_ppnl = 1, nprj_ppnl(l)
+                        lprj_ppnl = l + 2*(iprj_ppnl - 1)
+                        ppnl_radius(l) = MAX(ppnl_radius(l),&
+                        exp_radius(lprj_ppnl, alpha_ppnl(l), qs_control%eps_ppl,cprj_ppnl(iprj_ppnl,l),rlow=ppnl_radius(l)))
+                END DO
+           END DO
+
+           ALLOCATE(fe(nr), rc(nr))
+
+
+           DEALLOCATE(fe,rc)
+   END SUBROUTINE atomic_ppnl
+END MODULE qs_tddfpt2_soc_utils

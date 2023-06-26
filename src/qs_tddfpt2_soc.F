@@ -39,6 +39,7 @@ MODULE qs_tddfpt2_soc
                                               cp_fm_struct_write_info,&
                                               cp_fm_struct_release
    USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_get_element,&
                                               cp_fm_get_info,&
                                               cp_fm_write_info,&
                                               cp_fm_release,&
@@ -56,6 +57,8 @@ MODULE qs_tddfpt2_soc
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_add_iter_level,&
                                               cp_iterate,&
+                                              cp_print_key_should_output,&
+                                              cp_p_file,&
                                               cp_print_key_finished_output,&
                                               cp_print_key_unit_nr,&
                                               cp_rm_iter_level
@@ -106,7 +109,6 @@ MODULE qs_tddfpt2_soc
    USE qs_kind_types,                   ONLY: get_qs_kind,&
                                               get_qs_kind_set,&
                                               qs_kind_type
-
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_mo_types,                     ONLY: get_mo_set,&
@@ -125,7 +127,9 @@ MODULE qs_tddfpt2_soc
                                              compute_sphi_so, &
                                              truncate_radial_grid
    USE qs_tddfpt2_soc_utils,           ONLY: rcs_amew_soc_elements,&
-                                             soc_dipole_operator
+                                             soc_dipole_operator,&
+                                             atomic_pseudopotential
+   USE qs_tddfpt2_types,               ONLY: tddfpt_ground_state_mos
    USE lebedev,                        ONLY: deallocate_lebedev_grids,&
                                              get_number_of_lebedev_grid,&
                                              init_lebedev_grids,&
@@ -154,7 +158,7 @@ MODULE qs_tddfpt2_soc
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt2_soc'
 
-   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
+   LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .FALSE.
 
    INTEGER, PARAMETER, PRIVATE          :: nderivs = 3
    INTEGER, PARAMETER, PRIVATE          :: maxspins = 2
@@ -186,13 +190,15 @@ CONTAINS
 !> \note Based on tddfpt2_methods and xas_tdp_utils.
 ! **************************************************************************************************
 
-   SUBROUTINE tddfpt_soc(qs_env, evals_a, evals_b, evects_a, evects_b)
+   SUBROUTINE tddfpt_soc(qs_env, evals_a, evals_b, evects_a, evects_b,gs_mos)
 
       TYPE(qs_environment_type), POINTER, INTENT(IN)   :: qs_env
       REAL(kind=dp), DIMENSION(:), INTENT(IN)          :: evals_a, &
                                                           evals_b
       TYPE(cp_fm_type),DIMENSION(:,:), INTENT(IN)      :: evects_a, &
                                                           evects_b
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                                       :: gs_mos
       CHARACTER(LEN=*), PARAMETER                      :: routineN="tddfpt_soc"
 
       INTEGER                                          :: handle,&
@@ -233,7 +239,7 @@ CONTAINS
       END IF
 
       IF (log_unit > 0) WRITE(log_unit,'(A)') "Starting restricted closed shell:"
-      CALL tddfpt_soc_rcs(qs_env, evals_a,evals_b, evects_a,evects_b,log_unit)
+      CALL tddfpt_soc_rcs(qs_env, evals_a,evals_b, evects_a,evects_b,log_unit,gs_mos)
 
       IF (log_unit > 0) THEN
          WRITE(log_unit, '(A,/,A)') "SOC Calculation terminated",&
@@ -254,7 +260,7 @@ CONTAINS
    ! \param evects_trip: eigenvectors og the triplet excitations
    !**********************************************************************************
 
-   SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,evals_trip, evects_sing,evects_trip,log_unit)
+   SUBROUTINE tddfpt_soc_rcs(qs_env, evals_sing,evals_trip, evects_sing,evects_trip,log_unit,gs_mos)
 
       TYPE(qs_environment_type), POINTER        :: qs_env
       CHARACTER(LEN=*), PARAMETER               :: routineN ="tddfpt_soc_rcs"
@@ -324,6 +330,8 @@ CONTAINS
                                                    soc_gst, &
                                                    eps_filter,&
                                                    tmp
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                                :: gs_mos
       TYPE(section_vals_type), POINTER          :: soc_section
       REAL(dp), ALLOCATABLE, DIMENSION(:)       :: diag, &
                                                    tmp_evals
@@ -340,6 +348,10 @@ CONTAINS
       LOGICAL                                   :: print_ev, print_wn,&
                                                    print_splitting
       CHARACTER(len=1)                          :: mult
+     ! !! OUTPUT structures
+      REAL(dp),DIMENSION(:,:), ALLOCATABLE      :: real_tmp, img_tmp
+     ! COMPLEX(dp), DIMENSION(:,:)               :: evect_tmp
+      REAL(dp)                                  :: unit_scale
       
       CALL timeset(routineN, handle)
 
@@ -363,9 +375,25 @@ CONTAINS
       CALL inititialize_soc(qs_env, soc_atom_env, soc_env, & 
                             evects_sing, evects_trip,dipole_form)
 
+
       NULLIFY(mos)
       CALL get_qs_env(qs_env, mos=mos, para_env=para_env, blacs_env=blacs_env)
       CALL get_mo_set(mos(1), nao=nao, homo=nactive) 
+
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "PSEUDOPOTENTIAL"
+             WRITE(log_unit, '(A)') "__________________________________________________________________"
+             WRITE(log_unit,'(A)') "-KIND    POINT   RADIUS        Vppl               Vppnl           -"
+             WRITE(log_unit, '(A)') "__________________________________________________________________"
+             DO ii = 1,SIZE(soc_atom_env%grid_atom_set)
+                DO jj = 1,soc_atom_env%grid_atom_set(ii)%grid_atom%nr
+                        WRITE(log_unit,'(1X,I4,4X,I4,1X,F8.5,3X,F17.8,3X,F17.8)') ii,jj,& 
+                                         soc_atom_env%grid_atom_set(ii)%grid_atom%rad(jj),&
+                                         soc_atom_env%vppl(ii,jj), soc_atom_env%vppnl(ii,jj)
+                END DO
+             END DO
+             WRITE(log_unit,'(A)') "Building SOC-Operator"
+     END IF
 
      ! this will create the H^SOC in an atomic basis
       CALL integrate_soc_atoms(soc_env%orb_soc, qs_env=qs_env, soc_atom_env=soc_atom_env)
@@ -379,6 +407,13 @@ CONTAINS
       orb_soc_x => soc_env%orb_soc(1)%matrix
       orb_soc_y => soc_env%orb_soc(2)%matrix
       orb_soc_z => soc_env%orb_soc(3)%matrix
+
+     ! IF (log_unit > 0) THEN
+     !         CALL dbcsr_print(orb_soc_x, unit_nr=log_unit)
+     !         CALL dbcsr_print(orb_soc_y, unit_nr=log_unit)
+     !         CALL dbcsr_print(orb_soc_z, unit_nr=log_unit)
+     ! END IF
+
 
       !! Create a matrix-structure, which links all states in this calculation
       NULLIFY(full_struct)
@@ -462,7 +497,8 @@ CONTAINS
       CALL copy_fm_to_dbcsr(soc_env%b_coeff, dbcsr_tp)
 
       !Create the work and helper fms
-      CALL get_mo_set(mos(1),mo_coeff=gs_coeffs)
+      !CALL get_mo_set(mos(1),mo_coeff=gs_coeffs)
+      gs_coeffs => gs_mos(1)%mos_occ
       CALL cp_fm_get_info(gs_coeffs, matrix_struct=vec_struct)
       CALL cp_fm_create(vec_soc_x, vec_struct)
       CALL cp_fm_create(vec_soc_y, vec_struct)
@@ -477,6 +513,10 @@ CONTAINS
       CALL cp_fm_create(work_fm, work_struct)
       CALL cp_fm_create(tmp_fm, work_struct)
 
+
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "Starting Precomputations"
+     END IF
 
       !! Begin with the precomputation 
       !! Prefactor due to rcs.
@@ -519,6 +559,9 @@ CONTAINS
 !  matrix is Hermitian i.e. the real part is symmetric and the imaginary part is anti-symmetric.
 !  Can only fill upper half
 
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "Startung Ground-State contributions..."
+     END IF
       !Start with the ground state/triplet SOC, SOC*gs_coeffs already computed above
       !note: we are computing <0|H|T>, but have SOC*gs_coeffs instead of gs_coeffs*SOC in store. 
       !Since the SOC Hamiltonian is anti-symmetric, a - signs pops up in the gemms below
@@ -544,9 +587,9 @@ CONTAINS
          diag(:) = get_diag(gstp_block)
          soc_gst = SUM(diag)
          !!  <0|H_x|T^-1>
-         !CALL cp_fm_set_element(img_fm, 1, 1 + nsg + itp, -1_dp*soc_gst) 
+         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + itp, -1_dp*soc_gst) 
          !! <0|H_x|T^+1>
-         !CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst) 
+         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + 2*ntp + itp, soc_gst) 
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -567,9 +610,9 @@ CONTAINS
          diag(:) = get_diag(gstp_block)
          soc_gst = SUM(diag)
          ! <0|H_y|T^-1>
-!         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + itp, -1.0_dp*soc_gst) 
+         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + itp, -1.0_dp*soc_gst) 
          ! <0|H_y|T^+1>
-!         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + 2*ntp + itp, -1.0_dp*soc_gst) 
+         CALL cp_fm_set_element(real_fm, 1, 1 + nsg + 2*ntp + itp, -1.0_dp*soc_gst) 
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -593,7 +636,7 @@ CONTAINS
                                   n_cols=nactive)
          diag(:) = get_diag(gstp_block)
          soc_gst = sqrt2*SUM(diag)
-!         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
+         CALL cp_fm_set_element(img_fm, 1, 1 + nsg + ntp + itp, soc_gst)
       END DO
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -616,6 +659,10 @@ CONTAINS
       CALL cp_fm_struct_release(prod_struct)
       DEALLOCATE (gstp_block)
 
+      
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "Starting Singlet-Triplet contributions..."
+     END IF
       !Now do the singlet-triplet SOC
       !start by computing the singlet-triplet overlap
       ! <S|T>
@@ -655,14 +702,14 @@ CONTAINS
       !<S|H_x|T^-1>
       !! Convert to fm for transfer to img_fm
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=2, &
-!                              t_firstcol=1 + nsg + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=2, &
+                              t_firstcol=1 + nsg + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^-1> in Hartree / cm^-1"
@@ -673,14 +720,14 @@ CONTAINS
 
       !<S|H_x|T^+1> takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=2, &
-!                              t_firstcol=1 + nsg + 2*ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=2, &
+                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
@@ -710,14 +757,14 @@ CONTAINS
 
       !<S|H_y|T^-1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=real_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=2, &
-!                              t_firstcol=1 + nsg + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=real_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=2, &
+                              t_firstcol=1 + nsg + 1)
 
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
@@ -728,14 +775,14 @@ CONTAINS
       ENDIF
 
       !<S|H_y|T^+1>
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=real_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=2, &
-!                              t_firstcol=1 + nsg + 2*ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=real_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=2, &
+                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^+1> in Hartree / cm^-1"
@@ -763,14 +810,14 @@ CONTAINS
 
       !<S|H_z|T^0>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=2, &
-!                              t_firstcol=1 + nsg + ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=2, &
+                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<S|H_x|T^0> in Hartree / cm^-1"
@@ -779,6 +826,9 @@ CONTAINS
          CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
       ENDIF
 
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "Starting Triplet-Triplet contributions..."
+     END IF
       !Now the triplet-triplet SOC
       !start by computing the overlap
       CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -810,14 +860,14 @@ CONTAINS
 
    !   !<T^0|H_x|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=1 + nsg + ntp + 1, &
-!                              t_firstcol=1 + nsg + 2*ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=1 + nsg + ntp + 1, &
+                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -829,14 +879,14 @@ CONTAINS
       !<T^-1|H_x|T^0>, takes a minus sign and a transpose (because computed <T^0|H_x|T^-1>)
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
-!      CALL cp_fm_to_fm_submat(msource=work_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=1 + nsg + 1, &
-!                              t_firstcol=1 + nsg + ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=work_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=1 + nsg + 1, &
+                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^0> in Hartree / cm^-1"
@@ -864,13 +914,13 @@ CONTAINS
 
       !<T^0|H_y|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=real_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1, t_firstrow=1 + nsg + ntp + 1, &
-!                              t_firstcol=1 + nsg + 2*ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=real_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1, t_firstrow=1 + nsg + ntp + 1, &
+                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -882,13 +932,13 @@ CONTAINS
       !<T^-1|H_y|T^0>, takes a minus sign and a transpose
       CALL cp_fm_transpose(tmp_fm, work_fm)
       CALL cp_fm_scale(-1.0_dp, work_fm)
-!      CALL cp_fm_to_fm_submat(msource=work_fm,&
-!                              mtarget=real_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1, t_firstrow=1 + nsg + 1, &
-!                              t_firstcol=1 + nsg + ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=work_fm,&
+                              mtarget=real_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1, t_firstrow=1 + nsg + 1, &
+                              t_firstcol=1 + nsg + ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^0|H_x|T^+1> in Hartree / cm^-1"
@@ -916,14 +966,14 @@ CONTAINS
 
       !<T^+1|H_z|T^+1>
       CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=1 + nsg + 2*ntp + 1, &
-!                              t_firstcol=1 + nsg + 2*ntp + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=1 + nsg + 2*ntp + 1, &
+                              t_firstcol=1 + nsg + 2*ntp + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^+1|H_x|T^+1> in Hartree / cm^-1"
@@ -934,14 +984,14 @@ CONTAINS
 
       !<T^-1|H_z|T^-1>, takes a minus sign
       CALL cp_fm_scale(-1.0_dp, tmp_fm)
-!      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
-!                              mtarget=img_fm,&
-!                              nrow=nex,&
-!                              ncol=nex, &
-!                              s_firstrow=1,&
-!                              s_firstcol=1,&
-!                              t_firstrow=1 + nsg + 1, &
-!                              t_firstcol=1 + nsg + 1)
+      CALL cp_fm_to_fm_submat(msource=tmp_fm,&
+                              mtarget=img_fm,&
+                              nrow=nex,&
+                              ncol=nex, &
+                              s_firstrow=1,&
+                              s_firstcol=1,&
+                              t_firstrow=1 + nsg + 1, &
+                              t_firstcol=1 + nsg + 1)
 
       IF (debug_this_module.AND.(log_unit>0)) THEN
          WRITE(log_unit,"(/,A)") "<T^-1|H_x|T^-1> in Hartree / cm^-1"
@@ -956,10 +1006,15 @@ CONTAINS
       CALL cp_fm_release(tmp_fm)
       DEALLOCATE (diag, mo_soc_x, mo_soc_y, mo_soc_z)
 
+
+     IF (log_unit > 0) THEN
+             WRITE(log_unit,'(A)') "Diagonlzing SOC-Matrix"
+     END IF
+
 !  Set-up the complex hermitian perturbation matrix
       CALL cp_cfm_create(hami_cfm, full_struct)
       CALL cp_fm_to_cfm(real_fm, img_fm, hami_cfm)
-
+      
       !!Optinal Output: SOC-Matrix
       IF (logger%para_env%is_source()) THEN
          log_unit = cp_print_key_unit_nr(logger,& 
@@ -977,47 +1032,47 @@ CONTAINS
       !! But if not needed, we may reduce the number to one to save space and time
       CALL section_vals_val_get(soc_print_section, "UNIT_eV", l_val=print_ev)
       CALL section_vals_val_get(soc_print_section, "UNIT_wn", l_val=print_wn)
-      CALL section_vals_val_get(soc_print_section, "SPLITTING", l_val=print_splitting)  
+      CALL section_vals_val_get(soc_print_section, "SPLITTING", l_val=print_splitting)
+
+      IF (print_ev) THEN
+            unit_scale = evolt
+      ELSE IF (print_wn) THEN
+            unit_scale = wavenumbers
+      ELSE  
+            CPWARN("No putput unit was selected, printout will be in Hartree!")
+            unit_scale = 1
+      END IF
 
       !! This needs something to deal with a parallel run
       !! This output will be needed for NEWTONX for ISC!!
-      IF (log_unit > 0) THEN
-         WRITE(log_unit,'(A,I3,I3)') "NUMBER OF STATES: ",SIZE(real_fm%local_data,1), SIZE(real_fm%local_data,2)
-         WRITE(log_unit, "(A,I3)")      "NUMBER OF TOTAL STATES: ", ntot
-         IF (print_ev) THEN
-                WRITE(log_unit,'(A)')  "____________________________________________________"
-                WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
-                WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
-                WRITE(log_unit,'(A)')  "____________________________________________________"
-                DO jj = 1,SIZE(real_fm%local_data,2)
-                        DO ii = 1,SIZE(real_fm%local_data,1)
-                                WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
-                                real_fm%local_data(ii,jj)*evolt,&
-                                img_fm%local_data(ii,jj)*evolt
-                        END DO
-                END DO
-                WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
-                WRITE(log_unit,'(A)')  "____________________________________________________"
-                WRITE(log_unit,'(A)')  "____________________________________________________"
-         END IF
-
-         IF (print_wn) THEN
-                 WRITE(log_unit,'(A)')  "____________________________________________________"
-                 WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
-                 WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[cm-1]     IMG-PART[cm-1]  "
-                 WRITE(log_unit,'(A)')  "____________________________________________________"
-                 DO jj = 1,SIZE(real_fm%local_data,2)
-                        DO ii = 1,SIZE(real_fm%local_data,1)
-                                WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
-                                real_fm%local_data(ii,jj)*wavenumbers,&
-                                img_fm%local_data(ii,jj)*wavenumbers
-                        END DO
-                 END DO
-                 WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
-                 WRITE(log_unit,'(A)')  "____________________________________________________"
-                 WRITE(log_unit,'(A)')  "____________________________________________________"
-         END IF
-      END IF
+    !  IF (log_unit > 0) THEN
+    !     WRITE(log_unit,'(A)')  "____________________________________________________"
+    !     WRITE(log_unit,'(A)')  "                   FULL SOC-Matrix                  "
+    !     IF (print_ev) THEN
+    !            WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[eV]       IMG-PART[eV]    "
+    !    ELSE IF (print_wn) THEN
+    !            WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[cm-1]       IMG-PART[cm-1]"
+    !    ELSE
+    !            WRITE(log_unit,'(A)')  "STATE   STATE   REAL-PART[Hartree] IMG-PART[Hartree]"
+    !    END IF
+    !    WRITE(log_unit,'(A)')  "____________________________________________________"
+    !    ALLOCATE(real_tmp(ntot,ntot),img_tmp(ntot,ntot))
+    !    CALL cp_fm_get_submatrix(real_fm, real_tmp)
+    !    CALL cp_fm_get_submatrix(img_fm, img_tmp)
+    !    DO jj = 1,SIZE(real_fm%local_data,2)
+    !            DO ii = 1,SIZE(real_fm%local_data,1)
+    !                    !CALL cp_fm_get_element(real_fm,ii,jj,real_tmp)
+    !                    !CALL cp_fm_get_element(img_fm,ii,jj,img_tmp)
+    !                    WRITE(unit=log_unit, fmt="(I3,5X,I3,5X,f16.8,5X,f16.8)")ii,jj,&
+    !                    real_tmp(ii,jj)*unit_scale,&
+    !                    img_tmp(ii,jj)*unit_scale
+    !            END DO
+    !    END DO
+    !    DEALLOCATE(real_tmp, img_tmp)
+    !    WRITE(log_unit,'(A)')  "                   END SOC-MATRIX                   "
+    !    WRITE(log_unit,'(A)')  "____________________________________________________"
+    !    WRITE(log_unit,'(A)')  "____________________________________________________"
+    !  END IF
 
       CALL cp_fm_release(real_fm)
       CALL cp_fm_release(img_fm)
@@ -1040,13 +1095,14 @@ CONTAINS
 
       IF (log_unit > 0) THEN
               WRITE(log_unit,'(A27,6X,F18.10)') "Ground state stabilisation:", soc_env%soc_evals(1)
+              WRITE(log_unit,'(A)') "Calculation Dipole Moments"
       END IF
 
   !Compute the dipole oscillator strengths
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
-                     evecs_cfm, eps_filter, dipole_form)
+                     evecs_cfm, eps_filter, dipole_form,gs_mos)
 
 
    !Create final output
@@ -1060,24 +1116,21 @@ CONTAINS
          log_unit = -1
       END IF
 
-      IF (log_unit > 0 .AND. print_ev) THEN
+      IF (log_unit > 0) THEN
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
-         WRITE(log_unit,'(A)') "                          SOC CORRECTED SPECTRUM                              "
+         WRITE(log_unit,'(A)') "-                         SOC CORRECTED SPECTRUM                             -"
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
-         WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]"
-         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
-         DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F10.5)') istate, soc_env%soc_evals(istate)*evolt, soc_env%soc_osc(istate)
-         END DO
-      END IF
-      IF (log_unit > 0 .AND. print_wn) THEN
-         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
-         WRITE(log_unit,'(A)') "      STATE   SOC-corrected exc. energies [cm^-1]  Oscillator strengths [a.u.]"
+         IF (print_ev) THEN
+                WRITE(log_unit,'(A)') "-     STATE   SOC-corrected exc. energies [eV]  Oscillator strengths [a.u.]  -"
+         ELSE IF (print_wn) THEN
+                 WRITE(log_unit,'(A)') "-     STATE   SOC-corrected exc. energies [cm-1] Oscillator strengths [a.u.]-"
+         ELSE
+                 WRITE(log_unit,'(A)') "-     STATE SOC-corrected exc.energies [Hartree] Oscillator strengths [a.u.]-"
+         END IF
          WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE(log_unit,'(6X,I3,11X,2F15.5)') istate, soc_env%soc_evals(istate)*wavenumbers, soc_env%soc_osc(istate)
+            WRITE(log_unit,'(6X,I3,11X,2F16.5)') istate, soc_env%soc_evals(istate)*unit_scale, soc_env%soc_osc(istate)
          END DO
-         WRITE(log_unit,'(A)') "------------------------------------------------------------------------------"
       END IF
 
       !! We may be interested in the splitting of states
@@ -1089,9 +1142,15 @@ CONTAINS
               tmp = 0.0
               mult = ""
               WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
-              WRITE(log_unit,'(A)') "                             Splittings                                 "
+              WRITE(log_unit,'(A)') "-                            Splittings                                -"
               WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
-              WRITE(log_unit,'(A)') "   STATE   MULT     exc.energies[eV]    splittings[eV]                  "
+              IF (print_ev) THEN
+                        WRITE(log_unit,'(A)') "-  STATE   MULT     exc.energies[eV]    splittings[eV]                 -"
+              ELSE IF (print_wn) THEN
+                        WRITE(log_unit,'(A)') "-  STATE   MULT     exc.energies[cm-1]  splittings[cm-1]               -"
+              ELSE
+                        WRITE(log_unit,'(A)') "-  STATE   MULT     exc.energies[Hartree]  splittings[Hartree]         -"
+              END IF
               WRITE(log_unit,'(A)') "------------------------------------------------------------------------"
               DO WHILE(iex <= SIZE(soc_env%soc_evals))
                     IF (evals_sing(isg) < evals_trip(itp) .OR. itp > SIZE(evals_trip) ) THEN
@@ -1103,12 +1162,12 @@ CONTAINS
                             mult = "T"
                             itp = itp + 1
                     END IF
-                    WRITE(log_unit,'(3X,I3,7X,A,7X,F15.10,7X,F13.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                    WRITE(log_unit,'(3X,I3,7X,A,7X,F16.8,7X,F16.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
                     iex = iex + 1
                     IF (mult == "T") THEN
                         DO ii = 1,2
                                 tmp = soc_env%soc_evals(iex) - evals_trip(itp-1)
-                                WRITE(log_unit,'(3X,I3,7X,A,7X,F13.8,7X,F13.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
+                                WRITE(log_unit,'(3X,I3,7X,A,7X,F16.8,7X,F16.8)') iex, mult, soc_env%soc_evals(iex)*evolt, tmp*evolt
                                 iex = iex + 1
                         END DO
                     END IF 
@@ -1223,36 +1282,7 @@ CONTAINS
             grid_info(irep,:) = k_list
          END DO
 
-         CALL soc_dipole_operator(soc_env%dipmat, tddfpt_control, qs_env)
-
-!         !! Generate the dipole operator
-!         ALLOCATE (soc_env%dipmat(3))
-!         DO i = 1, 3
-!            ALLOCATE (soc_env%dipmat(i)%matrix)
-!            CALL dbcsr_copy(soc_env%dipmat(i)%matrix,&
-!                             matrix_s(1)%matrix,&
-!                             name="dipole matrix")
-!            CALL dbcsr_set(soc_env%dipmat(i)%matrix, 0.0_dp)
-!         END DO
-!
-!         !  Precompute it in the velocity representation, if so chosen
-!         IF (dipole_form == tddfpt_dipole_velocity) THEN
-!            ! maybe minimum image is not sufficient - > done in XAS to avoid any PBC related issues
-!            CALL p_xyz_ao(soc_env%dipmat, qs_env, minimum_image=.TRUE.)
-!         ELSE IF (dipole_form == tddfpt_dipole_length) THEN
-!            DO i = 1, SIZE(particle_set)
-!               NULLIFY (work)
-!               rc = particle_set(i)%r
-!               ALLOCATE (work(9))     !! Three Dimensions x,y,z, 9 if there would be needed for quadropole
-!               DO j = 1,3
-!                  CALL dbcsr_set(soc_env%dipmat(j)%matrix, 0.0_dp)
-!                  work(j)%matrix => soc_env%dipmat(j)%matrix
-!               END DO
-!               CALL rRc_xyz_ao(work, qs_env, rc, order=1, minimum_image=.TRUE.)
-!            END DO
-!         ELSE
-!                 CPABORT("DIPOLE FORM NOT IMPLEMENTED!")
-!         END IF
+         CALL soc_dipole_operator(soc_env%dipmat,tddfpt_control,qs_env)
 
          !! We need to change and create structures for the exitation vectors.
          !! All excited states shall be written in one matrix, oneafter the other
@@ -1302,6 +1332,8 @@ CONTAINS
             NULLIFY (soc_atom_env%orb_sphi_so(ikind)%array) 
             CALL compute_sphi_so(ikind, "ORB", soc_atom_env%orb_sphi_so(ikind)%array, qs_env)
          END DO !ikind
+
+         CALL atomic_pseudopotential(soc_atom_env, qs_env)
 
          CALL timestop(handle)
 
@@ -1362,6 +1394,17 @@ CONTAINS
          REAL(dp), ALLOCATABLE, DIMENSION(:, :)           :: rga
          REAL(dp), DIMENSION(:, :, :), POINTER            :: my_CG
          CHARACTER(LEN=*), PARAMETER               :: routineN ="init_atom_grid"
+         !!DEBUG
+         INTEGER :: log_unit
+         TYPE(cp_logger_type), POINTER   :: logger
+
+         logger => cp_get_default_logger()
+        IF (logger%para_env%is_source()) THEN
+         log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+        ELSE
+         log_unit = -1
+        END IF
+
 
          CALL timeset(routineN, handle)
 
@@ -1444,6 +1487,9 @@ CONTAINS
 !  Create the Lebedev grids and compute the spherical harmonics
       CALL init_lebedev_grids()
       quadrature = qs_control%gapw_control%quadrature
+
+      !!DEBUG
+      IF (log_unit > 0) WRITE(log_unit,'(A,I4)') "quadrature: ",quadrature
 
       DO ikind = 1, SIZE(soc_atom_env%grid_atom_set)
 
@@ -1562,102 +1608,107 @@ CONTAINS
                                                           nfullcols_total, handle
          CHARACTER(LEN=*), PARAMETER                   :: routineN ="print_soc"
 
-         CALL timeset(routineN, handle)
-
-         !! Inizalize logical variables
-         print_dbcsr = .FALSE.
-         print_fm = .FALSE.
-         db2fm =  .FALSE.
-         print_realvec = .FALSE.
-         print_2realvec = .FALSE.
-         print_int = .FALSE.
-
-         !! Interpret the output to find out, what should be printed
-         IF (PRESENT(dbcsr2fm)) db2fm = dbcsr2fm
-         IF (PRESENT(integ)) print_int = .TRUE. 
-         IF (PRESENT(dbcsr_matrix) .AND. .NOT. db2fm) print_dbcsr = .TRUE.
-         IF (PRESENT(fm_matrix)) print_fm = .TRUE.
-         IF (PRESENT(dbcsr_matrix) .AND. db2fm) print_fm=.TRUE.
-         IF (PRESENT(real_vec)) THEN 
-            IF (PRESENT(real_vec2)) THEN
-               print_2realvec = .TRUE.
-               IF (.NOT. PRESENT(real1)) THEN
-                  real_1 = 1.0_dp
-               ELSE
-                  real_1 = real1
-               END IF
-               IF (.NOT. PRESENT(real2)) THEN 
-                  real_2 = 1.0_dp
-               ELSE
-                  real_2 = real2
-               END IF
-            ELSE
-               print_realvec=.TRUE.
-            IF (.NOT. PRESENT(real1)) THEN
-               real_1 = 1.0_dp
-            ELSE 
-               real_1 = real1
-            END IF
-         END IF
-      END IF
-
-      !! Make the output unit for the project-name-SOC.soc-File
-      ounit = cp_print_key_unit_nr(logger, tddfpt_print_section, key, &
-                                   extension=ext, &
-                                   file_form="FORMATTED", & 
-                                   file_action="WRITE", &
-                                   file_status="UNKNOWN")
-
-      !! If the Unit is valid, print the matrix
-      IF (ounit > 0) THEN
-         WRITE(ounit, '(A)') header
-         IF (db2fm) THEN
-            IF (.NOT. PRESENT(blacs_env)) THEN
-               WRITE(ounit, '(/,A)') "blacs_env is needed for dbcsr conversion!"
-               RETURN
-            END IF
-             !! First ew need to convert the dbcsr_type to a fm-type
-             ALLOCATE(soc_fm)
-             CALL dbcsr_get_info(dbcsr_matrix%matrix, &
-                                 nfullrows_total=nfullrows_total, &
-                                nfullcols_total=nfullcols_total)
-             CALL cp_fm_struct_create(soc_struc,&
-                                      context=blacs_env,&
-                                      ncol_global=nfullcols_total, &
-                                       nrow_global=nfullrows_total)
-            CALL cp_fm_create(soc_fm, soc_struc )
-            CALL copy_dbcsr_to_fm(dbcsr_matrix%matrix, soc_fm)
-            CALL cp_fm_write_formatted(soc_fm, ounit, starter)
-            CALL cp_fm_struct_release(soc_struc)
-            CALL cp_fm_release(soc_fm)
-           DEALLOCATE(soc_struc)
-           DEALLOCATE(soc_fm)
-         ELSE IF (print_dbcsr) THEN
-           CALL dbcsr_print(dbcsr_matrix%matrix, unit_nr=ounit)
-         ELSE IF (print_fm) THEN
-           CALL cp_fm_write_formatted(fm_matrix, ounit, starter)
-         ELSE IF (print_2realvec) THEN
-           DO i = 1,SIZE(real_vec)
-              write(ounit,&
-            '(I3,5x,F10.6,5x,F10.6)') i,real_vec(i)*real_1, real_vec2(i)*real_2
-           END DO
-         ELSE IF (print_realvec) THEN
-           DO i = 1,SIZE(real_vec)
-              write(ounit, '(I3,5x,F10.6)')  i, real_vec(i) * real_1
-           END DO
-         ELSE IF (print_int) THEN
-           write(ounit, '(I10,/)') integ
-         ELSE
-            CPABORT('ERROR: There is nothing to print!')
-         END IF
-   ELSE
-         CPWARN('ERROR: No log-unit could be generated!')
+         IF (BTEST(cp_print_key_should_output(logger%iter_info, tddfpt_print_section, "SOC_PRINT"), cp_p_file)) THEN
+        
+                 CALL timeset(routineN, handle)
+        
+                 !! Inizalize logical variables
+                 print_dbcsr = .FALSE.
+                 print_fm = .FALSE.
+                 db2fm =  .FALSE.
+                 print_realvec = .FALSE.
+                 print_2realvec = .FALSE.
+                 print_int = .FALSE.
+        
+                 !! Interpret the output to find out, what should be printed
+                 IF (PRESENT(dbcsr2fm)) db2fm = dbcsr2fm
+                 IF (PRESENT(integ)) print_int = .TRUE. 
+                 IF (PRESENT(dbcsr_matrix) .AND. .NOT. db2fm) print_dbcsr = .TRUE.
+                 IF (PRESENT(fm_matrix)) print_fm = .TRUE.
+                 IF (PRESENT(dbcsr_matrix) .AND. db2fm) print_fm=.TRUE.
+                 IF (PRESENT(real_vec)) THEN 
+                    IF (PRESENT(real_vec2)) THEN
+                       print_2realvec = .TRUE.
+                       IF (.NOT. PRESENT(real1)) THEN
+                          real_1 = 1.0_dp
+                       ELSE
+                          real_1 = real1
+                       END IF
+                       IF (.NOT. PRESENT(real2)) THEN 
+                          real_2 = 1.0_dp
+                       ELSE
+                          real_2 = real2
+                       END IF
+                    ELSE
+                       print_realvec=.TRUE.
+                    IF (.NOT. PRESENT(real1)) THEN
+                       real_1 = 1.0_dp
+                    ELSE 
+                       real_1 = real1
+                    END IF
+                 END IF
+              END IF
+        
+              !! Make the output unit for the project-name-SOC.soc-File
+              ounit = cp_print_key_unit_nr(logger, tddfpt_print_section, key, &
+                                           extension=ext, &
+                                           file_form="FORMATTED", & 
+                                           file_action="WRITE", &
+                                           file_status="REPLACE")
+        
+              !! If the Unit is valid, print the matrix
+              IF (ounit > 0) THEN
+                 WRITE(ounit, '(A)') header
+                 IF (db2fm) THEN
+                    IF (.NOT. PRESENT(blacs_env)) THEN
+                       WRITE(ounit, '(/,A)') "blacs_env is needed for dbcsr conversion!"
+                       RETURN
+                    END IF
+                     !! First ew need to convert the dbcsr_type to a fm-type
+                     ALLOCATE(soc_fm)
+                     CALL dbcsr_get_info(dbcsr_matrix%matrix, &
+                                         nfullrows_total=nfullrows_total, &
+                                        nfullcols_total=nfullcols_total)
+                     CALL cp_fm_struct_create(soc_struc,&
+                                              context=blacs_env,&
+                                              ncol_global=nfullcols_total, &
+                                               nrow_global=nfullrows_total)
+                    CALL cp_fm_create(soc_fm, soc_struc )
+                    CALL copy_dbcsr_to_fm(dbcsr_matrix%matrix, soc_fm)
+                    CALL cp_fm_write_info(soc_fm, ounit)
+                    CALL cp_fm_write_formatted(soc_fm, ounit, starter)
+                    CALL cp_fm_struct_release(soc_struc)
+                    CALL cp_fm_release(soc_fm)
+                   DEALLOCATE(soc_struc)
+                   DEALLOCATE(soc_fm)
+                 ELSE IF (print_dbcsr) THEN
+                   CALL dbcsr_print(dbcsr_matrix%matrix, unit_nr=ounit)
+                 ELSE IF (print_fm) THEN
+                   CALL cp_fm_write_info(fm_matrix, ounit)
+                   CALL cp_fm_write_formatted(fm_matrix, ounit, starter)
+                 ELSE IF (print_2realvec) THEN
+                   DO i = 1,SIZE(real_vec)
+                      write(ounit,&
+                    '(I3,5x,F10.6,5x,F10.6)') i,real_vec(i)*real_1, real_vec2(i)*real_2
+                   END DO
+                 ELSE IF (print_realvec) THEN
+                   DO i = 1,SIZE(real_vec)
+                      write(ounit, '(I3,5x,F10.6)')  i, real_vec(i) * real_1
+                   END DO
+                 ELSE IF (print_int) THEN
+                   write(ounit, '(I10,/)') integ
+                 ELSE
+                    CPABORT('ERROR: There is nothing to print!')
+                 END IF
+           ELSE
+                 CPWARN('ERROR: No log-unit could be generated!')
+           END IF
+        
+           CALL cp_print_key_finished_output(ounit, logger,tddfpt_print_section, "SOC_PRINT")
+        
+           CALL timestop(handle)
    END IF
-
-   CALL cp_print_key_finished_output(ounit, logger,tddfpt_print_section, "SOC_PRINT")
-
-   CALL timestop(handle)
-
+        
 END SUBROUTINE print_soc
 
 !******************************************************************************
@@ -1713,8 +1764,10 @@ END SUBROUTINE  soc_contract_evect
 
 
 SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
-                        soc_evecs_cfm, eps_filter, dipole_form)
+                        soc_evecs_cfm, eps_filter, dipole_form,gs_mos)
       TYPE(qs_environment_type)                     :: qs_env
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                                    :: gs_mos
       TYPE(cp_blacs_env_type), POINTER              :: blacs_env
       TYPE(mp_para_env_type), POINTER               :: para_env
       TYPE(soc_env_type), TARGET                    :: soc_env
@@ -1731,7 +1784,16 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
       TYPE(cp_fm_struct_type), POINTER              :: dip_struct, full_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)   :: amew_dip
       TYPE(dbcsr_soc_package_type)                  :: dbcsr_soc_package
-   
+!      !!DEBUG
+!      INTEGER                                       :: log_unit
+!      TYPE(cp_logger_type), POINTER                 :: logger
+!
+!      logger => cp_get_default_logger()
+!      IF (logger%para_env%is_source()) THEN
+!         log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+!      ELSE
+!         log_unit = -1
+!      END IF
    
       CALL timeset(routineN, handle)
 
@@ -1760,8 +1822,9 @@ SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env,&
       ALLOCATE (transdip(ntot, 1))
    
       CALL get_rcs_amew_op(amew_dip,soc_env,dbcsr_soc_package,&
-                           eps_filter,qs_env)
-   
+                           eps_filter,qs_env,gs_mos)
+
+
       DO i = 1, 3 !cartesian coord x, y, z
    
          !Convert the real dipole into the cfm format for calculations
@@ -1821,10 +1884,12 @@ END SUBROUTINE soc_dipol
 ! \param qs_env: ...
 !**********************************************************************************
 
-SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env)
+SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env,gs_mos)
 
    TYPE(cp_fm_type), ALLOCATABLE,&
    DIMENSION(:), INTENT(OUT)                  :: amew_op
+   TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                              :: gs_mos
    TYPE(dbcsr_p_type), DIMENSION(:), POINTER  :: ao_op
    TYPE(qs_environment_type)                  :: qs_env
    TYPE(soc_env_type), TARGET                 :: soc_env
@@ -1868,19 +1933,19 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
    TYPE(mp_para_env_type), POINTER            :: para_env
    INTEGER                                    :: handle
    CHARACTER(len=*), PARAMETER                :: routineN = "get_rcs_amew_op"
-   !!DEBUG
-   TYPE(cp_logger_type),POINTER               :: logger
-   INTEGER                                    :: log_unit
-
-   NULLIFY(logger)
-   logger => cp_get_default_logger()
-   IF (logger%para_env%is_source() .AND. debug_this_module) THEN
-           log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
-   ELSE
-           log_unit = -1
-   END IF
-
-   !!END DEBUG
+!   !!DEBUG
+!   TYPE(cp_logger_type),POINTER               :: logger
+!   INTEGER                                    :: log_unit
+!
+!   NULLIFY(logger)
+!   logger => cp_get_default_logger()
+!   IF (logger%para_env%is_source()) THEN
+!           log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+!   ELSE
+!           log_unit = -1
+!   END IF
+!
+!   !!END DEBUG
 
    CALL timeset(routineN, handle)
 
@@ -1918,7 +1983,11 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
       END DO !i
 
 !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
-      CALL get_mo_set(mos(1), mo_coeff=gs_coeffs, nao=nao, homo=nactive)
+      !CALL get_mo_set(mos(1), mo_coeff=gs_coeffs, nao=nao, homo=nactive)
+      !!DEBUG
+      CALL get_mo_set(mos(1), nao=nao, homo=nactive)
+      gs_coeffs => gs_mos(1)%mos_occ
+      !!END DEBUG
       CALL cp_fm_get_info(gs_coeffs, matrix_struct=std_struct)
 
       CALL cp_fm_struct_create(gsgs_struct,&
@@ -1935,22 +2004,19 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
 
          ao_op_i => ao_op(i)%matrix
 
+        ! IF (log_unit > 0) THEN
+        !         WRITE(log_unit,'(A)') "AO-OPERATOR"
+        !         CALL dbcsr_print(ao_op_i,unit_nr=log_unit)
+        ! END IF
+
          CALL cp_dbcsr_sm_fm_multiply(ao_op_i, gs_coeffs, work_fm, ncol=nactive)
          CALL parallel_gemm('T', 'N', nactive, nactive, nao,&
                             1.0_dp, gs_coeffs,work_fm, 0.0_dp, gs_fm)
          CALL cp_fm_get_diag(gs_fm, gs_diag)
          gsgs_op(i) = 2.0_dp*SUM(gs_diag)
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit, '(A,F15.10)') "GS|GS contribution: ",gsgs_op(i)
-         END IF
 
       END DO !i
       DEALLOCATE (gs_diag)
-
-      IF (log_unit > 0) THEN
-             WRITE(log_unit,'(A)') "gs_coeff"
-             CALL cp_fm_write_formatted(gs_coeffs,log_unit)
-      END IF 
 
       CALL cp_fm_release(work_fm)
 
@@ -1999,22 +2065,10 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                      n_cols=nactive)
             diag(:) = get_diag(sggs_block)
             op = sqrt2*SUM(diag)
-            !!DEBUG
-            IF (log_unit > 0) THEN
-                    WRITE(log_unit,'(A)') "sggs_fm"
-                    CALL cp_fm_write_formatted(sggs_fm,log_unit)
-                    WRITE(log_unit, '(A,I3,A,I3,A,F16.10)') "SGGS contribution ",i, "with states ",isg,": ",op
-            END IF
 
             CALL cp_fm_set_element(amew_op(i), 1, 1 + isg, op)
          END DO
 
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit,'(A)') "vec_op"
-                    CALL cp_fm_write_formatted(vec_op,log_unit)
-                    WRITE(log_unit,'(A)') "mo_op"
-                    CALL cp_fm_write_formatted(gs_fm,log_unit)
-         END IF
          ! do the singlet-singlet components
          !start with the overlap
          CALL dbcsr_multiply('N', 'N', 1.0_dp,&
@@ -2044,7 +2098,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                     pref_trace=-1.0_dp, &
                                     pref_overall=1.0_dp,&
                                     pref_diags=gsgs_op(i),&
-                                    symmetric=.FALSE.)  !!FOR DEBUG
+                                    symmetric=.TRUE.)  !!FOR DEBUG
 
          CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
          CALL cp_fm_to_fm_submat(msource=tmp_fm,&
@@ -2085,7 +2139,7 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                     pref_trace=-1.0_dp, &
                                     pref_overall=1.0_dp,&
                                     pref_diags=gsgs_op(i),&
-                                    symmetric=.FALSE.)  !!FOR DEBUG
+                                    symmetric=.TRUE.)  !!FOR DEBUG
 
          CALL copy_dbcsr_to_fm(dbcsr_tmp, tmp_fm)
          !<T^-1|op|T^-1>
@@ -2117,11 +2171,11 @@ SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_e
                                  t_firstrow=1 + nsg + 2*ntp + 1, &
                                  t_firstcol=1 + nsg + 2*ntp + 1)
 
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit,'(A,I3)') "amew-operator: ", i
-                 CALL cp_fm_write_info(amew_op(i), log_unit)
-                 CALL cp_fm_write_formatted(amew_op(i), log_unit)
-         END IF
+        ! IF (log_unit > 0 .AND. debug_this_module) THEN
+        !         WRITE(log_unit,'(A,I3)') "amew-operator: ", i
+        !         CALL cp_fm_write_info(amew_op(i), log_unit)
+        !         CALL cp_fm_write_formatted(amew_op(i), log_unit)
+        ! END IF
 
 
          ! Symmetrize the matrix (only upper triangle built)

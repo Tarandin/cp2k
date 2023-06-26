@@ -26,6 +26,8 @@ MODULE qs_tddfpt2_soc_types
    USE kinds,                           ONLY: default_string_length,&
                                               dp
    USE libint_wrapper,                  ONLY: cp_libint_static_cleanup
+   USE pw_types,                        ONLY: pw_type,&
+                                              pw_release
    USE qs_mo_types,                     ONLY: mo_set_type
    USE qs_grid_atom,                    ONLY: deallocate_grid_atom,&
                                               grid_atom_type
@@ -94,6 +96,7 @@ MODULE qs_tddfpt2_soc_types
          TYPE(harmonics_atom_p_type), DIMENSION(:), &
          POINTER                                           :: harmonics_atom_set
          TYPE(cp_2d_r_p_type), DIMENSION(:), POINTER       :: orb_sphi_so
+         REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE        :: vppl, vppnl
       END TYPE
 
 CONTAINS
@@ -182,6 +185,9 @@ CONTAINS
             END DO
             DEALLOCATE (soc_atom_env%orb_sphi_so)
          END IF
+
+         IF (ALLOCATED(soc_atom_env%vppl)) DEALLOCATE(soc_atom_env%vppl)
+         IF (ALLOCATED(soc_atom_env%vppnl)) DEALLOCATE(soc_atom_env%vppnl)
 
          !Clean-up libint
          CALL cp_libint_static_cleanup()

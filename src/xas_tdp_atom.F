@@ -73,6 +73,9 @@ MODULE xas_tdp_atom
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: c_light_au
+   USE periodic_table,                  ONLY: get_ptable_info,&
+                                              ptable
+   USE pw_types,                        ONLY: pw_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_grid_atom,                    ONLY: allocate_grid_atom,&
@@ -998,9 +1001,6 @@ CONTAINS
          CALL build_xas_tdp_ovlp_nl(ab_list, basis_set_ri, basis_set_ri, qs_env)
          CALL build_xas_tdp_3c_nl(ac_list, basis_set_orb, basis_set_ri, do_potential_id, &
                                   qs_env, excited_atoms=neighbors)
-
-         IF (ASSOCIATED(ab_list)) CPWARN("ab_list is not associated")
-         IF (ASSOCIATED(ac_list)) CPWARN("ac_list is not associated")
 
          !Compute the 3-center overlap integrals
          pot%potential_type = do_potential_id
@@ -3234,9 +3234,6 @@ CONTAINS
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
 
-      !TYPE(cp_logger_type), POINTER                    :: logger
-      !INTEGER                                          :: log_unit
-
       NULLIFY (grid_atom, harmonics, basis, qs_kind_set, dslm_dxyz, slm, lmin, lmax, npgf, zet)
 
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
@@ -3251,15 +3248,6 @@ CONTAINS
 
       na = grid_atom%ng_sphere
       nr = grid_atom%nr
-      
-  !    NULLIFY(logger)
-  !    logger => cp_get_default_logger()
-  !    IF (logger%para_env%ionode) THEN
-  !      log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
-  !    ELSE
-  !       log_unit = -1
-  !    END IF
-   !   IF (log_unit>0) WRITE(log_unit,"(A,I8,A,I8)") "na", na, "nr", nr
 
       slm => harmonics%slm
       dslm_dxyz => harmonics%dslm_dxyz
@@ -3384,18 +3372,19 @@ CONTAINS
 !> \note We compute: <da_dx|V\(4c^2-2V)|db_dy> - <da_dy|V\(4c^2-2V)|db_dx>, where V is a model
 !>       potential on the atomic grid. What we get is purely imaginary
 ! **************************************************************************************************
-   SUBROUTINE integrate_soc_atoms(matrix_soc, xas_atom_env, qs_env, soc_atom_env,log_unit)
+   SUBROUTINE integrate_soc_atoms(matrix_soc, xas_atom_env, qs_env, soc_atom_env)
 
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_soc
       TYPE(xas_atom_env_type), POINTER, OPTIONAL         :: xas_atom_env
       TYPE(soc_atom_env_type), POINTER, OPTIONAL         :: soc_atom_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER, OPTIONAL                                  :: log_unit
+      INTEGER                                            :: log_unit
+      INTEGER                                            :: j, k
 
       CHARACTER(len=*), PARAMETER :: routineN = 'integrate_soc_atoms'
 
       INTEGER                                            :: blk, handle, i, iat, ikind, ir, jat, &
-                                                            maxso, na, nkind, nr, nset, nsgf
+                                                            maxso, na, nkind, nr, nset, nsgf, tmp_zeff
       REAL(dp)                                           :: zeff
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: Vr
       REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: V
@@ -3409,6 +3398,15 @@ CONTAINS
       TYPE(gto_basis_set_type), POINTER                  :: basis
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+      !!DEBUG
+      TYPE(cp_logger_type), POINTER                      :: logger
+
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+              log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+              log_unit = -1
+      END IF
 
       NULLIFY (int_soc, basis, qs_kind_set, sphi_so, matrix_s, grid)
       NULLIFY (particle_set)
@@ -3422,27 +3420,43 @@ CONTAINS
 
 !  Loop over the kinds to compute the integrals
       DO ikind = 1, nkind
-         CALL get_qs_kind(qs_kind_set(ikind), basis_set=basis, basis_type="ORB", zeff=zeff) !, grid_atom=grid) 
+         CALL get_qs_kind(qs_kind_set(ikind), basis_set=basis, basis_type="ORB")!, zeff=zeff , grid_atom=grid) 
          IF (present(soc_atom_env)) THEN
           grid => soc_atom_env%grid_atom_set(ikind)%grid_atom
+          CALL get_ptable_info(qs_kind_set(ikind)%element_symbol,number=tmp_zeff)
+          zeff = REAL(tmp_zeff)
          ELSE
-          CALL get_qs_kind(qs_kind_set(ikind), grid_atom=grid) 
+          CALL get_qs_kind(qs_kind_set(ikind), grid_atom=grid, zeff=zeff) 
          ENDIF
          CALL get_gto_basis_set(basis, nset=nset, maxso=maxso)
-         IF (present(log_unit)) THEN
-       !  IF (log_unit>0) WRITE(log_unit,"(A,F18.6,A,I8)") "zeff", zeff, "ikind", ikind
-       !  IF (log_unit>0) WRITE(log_unit,"(A,2I8)") "nset, maxso", nset, maxso
-          ENDIF
          ALLOCATE (intso(nset*maxso, nset*maxso, 3))
 
          ! compute the model potential on the grid
          nr = grid%nr
          na = grid%ng_sphere
-       !  IF (present(log_unit)) THEN
-       !    IF (log_unit>0) WRITE(log_unit,"(A,I8,A,2I8)") "grid%nr", grid%nr, "nr,na", nr,na
-       !  ENDIF
+         
          ALLOCATE (Vr(nr))
          CALL calculate_model_potential(Vr, grid, zeff)
+
+         IF (log_unit > 0) THEN 
+                 WRITE(log_unit,'(A)')  "_________________________________________________"
+                 WRITE(log_unit,'(A)')  "-KIND    POINT   RADIUS        V                -"
+                 WRITE(log_unit, '(A)') "_________________________________________________"
+                 DO ir = 1,nr
+                         WRITE(log_unit,'(1X,I4,4X,I4,4X,F10.7,2X,F20.8)') ikind,ir,&
+                                  grid%rad(ir), Vr(ir)
+                 END DO
+        END IF
+
+         IF (PRESENT(soc_atom_env)) THEN
+                 IF (ALLOCATED(soc_atom_env%vppl)) THEN
+                        Vr(:) = Vr(:) + soc_atom_env%vppl(ikind,1:nr)
+                 END IF  
+                 IF (ALLOCATED(soc_atom_env%vppnl)) THEN
+                         CPWARN("Vnlcc not ready")
+                         !Vr(:) = Vr(:) + soc_atom_env%vppnl(ikind,1:nr)
+                 END IF
+         END IF
 
          !Compute V/(4c^2-2V) and weight it
          ALLOCATE (V(na, nr))
@@ -3452,6 +3466,7 @@ CONTAINS
                        V(:, ir), 1)
          END DO
          DEALLOCATE (Vr)
+
 
          ! compute the integral <da_dx|...|db_dy> in terms of so
          IF (PRESENT(xas_atom_env)) THEN 

@@ -2611,18 +2611,6 @@ CONTAINS
                                                             dbcsr_work
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      !!DEBUG
-      TYPE(cp_logger_type),POINTER               :: logger
-      INTEGER                                    :: log_unit
-   
-      NULLIFY(logger)
-      logger => cp_get_default_logger()
-      IF (logger%para_env%is_source()) THEN
-              log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
-      ELSE
-              log_unit = -1
-      END IF
-      !!END DEBUG
 
       NULLIFY (gs_coeffs, sg_coeffs, matrix_s, full_struct, prod_struct, vec_struct, blacs_env)
       NULLIFY (para_env, mo_coeff, mos, gsgs_struct, std_struct, tmp_struct, sggs_struct)
@@ -2672,9 +2660,6 @@ CONTAINS
          CALL parallel_gemm('T', 'N', homo, homo, nao, 1.0_dp, mo_coeff, work_fm, 0.0_dp, gs_fm)
          CALL cp_fm_get_diag(gs_fm, gs_diag)
          gsgs_op(i) = 2.0_dp*SUM(gs_diag)
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit,'(A,F15.10)') "GS|GS contribution: ", gsgs_op(i)
-         END IF
 
       END DO !i
 
@@ -2700,23 +2685,11 @@ CONTAINS
       ALLOCATE (domo_op(ndo_mo, ndo_mo))
       ALLOCATE (sggs_block(ndo_mo, ndo_mo))
 
-      IF (log_unit > 0) THEN
-              WRITE(log_unit,'(A)') 'gs_coeffs'
-              CALL cp_fm_write_formatted(gs_coeffs,log_unit)
-              WRITE(log_unit,'(A)') 'mo_coeff'
-              CALL cp_fm_write_formatted(mo_coeff,log_unit)
-      END IF
-
 ! Iterate over the dimensions of the operator
 ! Note: operator matrices are asusmed symmetric, can only do upper half
       DO i = 1, dim_op
 
          ao_op_i => ao_op(i)%matrix
-
-        ! IF (log_unit > 0) THEN
-        !         WRITE(log_unit,'(A,I3)') "Dipole operator ",i
-        !         CALL dbcsr_print(ao_op_i,unit_nr=log_unit)
-        ! END IF
 
          ! The GS-GS contribution
          CALL cp_fm_set_element(amew_op(i), 1, 1, gsgs_op(i))
@@ -2733,20 +2706,8 @@ CONTAINS
                                      start_col=1, n_rows=ndo_mo, n_cols=ndo_mo)
             diag(:) = get_diag(sggs_block)
             op = sqrt2*SUM(diag)
-            IF (log_unit > 0) THEN
-                    WRITE(log_unit, '(A,I3,A,I3,A,F16.10)') "SGGS contribution ",i, "with states ",isg,": ",op
-            END IF
             CALL cp_fm_set_element(amew_op(i), 1, 1 + isg, op)
          END DO
-
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit,'(A)') "vec_op"
-                 CALL cp_fm_write_formatted(vec_op,log_unit)
-                 WRITE(log_unit,'(A)') "prod_fm"
-                 CALL cp_fm_write_formatted(prod_fm, log_unit)
-                 WRITE(log_unit,'(A)') "sggs_fm"
-                 CALL cp_fm_write_formatted(sggs_fm,log_unit)
-         END IF
 
          ! do the singlet-singlet components
          !start with the overlap
@@ -2792,12 +2753,6 @@ CONTAINS
          CALL cp_fm_to_fm_submat(msource=tmp_fm, mtarget=amew_op(i), nrow=nex, ncol=nex, &
                                  s_firstrow=1, s_firstcol=1, t_firstrow=1 + nsg + 2*ntp + 1, &
                                  t_firstcol=1 + nsg + 2*ntp + 1)
-
-         IF (log_unit > 0) THEN
-                 WRITE(log_unit,'(A,I3)') "AMEW-Operator with all component: ", i
-                 CALL cp_fm_write_info(amew_op(i), log_unit)
-                 CALL cp_fm_write_formatted(amew_op(i), log_unit)
-         END IF
 
          ! Symmetrize the matrix (only upper triangle built)
          CALL cp_fm_upper_to_full(amew_op(i), work_fm)

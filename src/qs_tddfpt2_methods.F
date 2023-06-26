@@ -1245,9 +1245,9 @@ CONTAINS
        ! Compute perturbative SOC correction
        ! Order should always be singlet triplet in tddfpt_soc
        IF (lmult_tmp) THEN
-         CALL tddfpt_soc(qs_env,evals_mult,evals,evects_mult,evects) !mult=singlet
+         CALL tddfpt_soc(qs_env,evals_mult,evals,evects_mult,evects, gs_mos) !mult=singlet
        ELSE
-         CALL tddfpt_soc(qs_env,evals,evals_mult,evects,evects_mult) !mult=triplet
+         CALL tddfpt_soc(qs_env,evals,evals_mult,evects,evects_mult,gs_mos) !mult=triplet
        ENDIF
 
        ! deallocate
