@@ -83,7 +83,8 @@ MODULE qs_environment_types
    USE post_scf_bandstructure_types,    ONLY: bs_env_release,&
                                               post_scf_bandstructure_type
    USE pw_env_types,                    ONLY: pw_env_type
-   USE pw_types,                        ONLY: pw_type
+   USE pw_types,                        ONLY: pw_release,&
+                                              pw_type
    USE qmmm_types_low,                  ONLY: qmmm_env_qm_type
    USE qs_active_space_types,           ONLY: active_space_type,&
                                               release_active_space_type
@@ -1462,11 +1463,11 @@ CONTAINS
          DEALLOCATE (qs_env%rho_external)
       END IF
       IF (ASSOCIATED(qs_env%external_vxc)) THEN
-         CALL qs_env%external_vxc%release()
+         CALL pw_release(qs_env%external_vxc)
          DEALLOCATE (qs_env%external_vxc)
       END IF
       IF (ASSOCIATED(qs_env%mask)) THEN
-         CALL qs_env%mask%release()
+         CALL pw_release(qs_env%mask)
          DEALLOCATE (qs_env%mask)
       END IF
       IF (ASSOCIATED(qs_env%active_space)) THEN
@@ -1474,10 +1475,10 @@ CONTAINS
       END IF
       ! Embedding potentials if provided as input
       IF (qs_env%given_embed_pot) THEN
-         CALL qs_env%embed_pot%release()
+         CALL pw_release(qs_env%embed_pot)
          DEALLOCATE (qs_env%embed_pot)
          IF (ASSOCIATED(qs_env%spin_embed_pot)) THEN
-            CALL qs_env%spin_embed_pot%release()
+            CALL pw_release(qs_env%spin_embed_pot)
             DEALLOCATE (qs_env%spin_embed_pot)
          END IF
       END IF
@@ -1684,11 +1685,11 @@ CONTAINS
          DEALLOCATE (qs_env%rho_external)
       END IF
       IF (ASSOCIATED(qs_env%external_vxc)) THEN
-         CALL qs_env%external_vxc%release()
+         CALL pw_release(qs_env%external_vxc)
          DEALLOCATE (qs_env%external_vxc)
       END IF
       IF (ASSOCIATED(qs_env%mask)) THEN
-         CALL qs_env%mask%release()
+         CALL pw_release(qs_env%mask)
          DEALLOCATE (qs_env%mask)
       END IF
       IF (ASSOCIATED(qs_env%active_space)) THEN
@@ -1696,10 +1697,10 @@ CONTAINS
       END IF
       ! Embedding potentials if provided as input
       IF (qs_env%given_embed_pot) THEN
-         CALL qs_env%embed_pot%release()
+         CALL pw_release(qs_env%embed_pot)
          DEALLOCATE (qs_env%embed_pot)
          IF (ASSOCIATED(qs_env%spin_embed_pot)) THEN
-            CALL qs_env%spin_embed_pot%release()
+            CALL pw_release(qs_env%spin_embed_pot)
             DEALLOCATE (qs_env%spin_embed_pot)
          END IF
       END IF

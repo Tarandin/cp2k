@@ -307,6 +307,12 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="SINGLE_PRECISION_MATRICES", &
+                          description="Matrices used within the LS code can be either double or single precision.", &
+                          usage="SINGLE_PRECISION_MATRICES", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="S_INVERSION", &
                           description="Method used to compute the inverse of S.", &
                           usage="S_PRECONDITIONER MOLECULAR", &
@@ -488,6 +494,12 @@ CONTAINS
          enum_desc=s2a("Using atomic blocks", &
                        "Using molecular blocks."), &
          enum_i_vals=(/ls_cluster_atomic, ls_cluster_molecular/))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="SINGLE_PRECISION_MATRICES", &
+                          description="Matrices used within the LS code can be either double or single precision.", &
+                          usage="SINGLE_PRECISION_MATRICES", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

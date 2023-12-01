@@ -34,12 +34,15 @@ MODULE qs_rho0_ggrid
                                               pw_scale,&
                                               pw_transfer,&
                                               pw_zero
-   USE pw_pool_types,                   ONLY: pw_pool_p_type,&
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_p_type,&
                                               pw_pool_type
    USE pw_types,                        ONLY: COMPLEXDATA1D,&
                                               REALDATA3D,&
                                               REALSPACE,&
                                               RECIPROCALSPACE,&
+                                              pw_release,&
                                               pw_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -155,9 +158,9 @@ CONTAINS
       CPASSERT(ASSOCIATED(pw_pool))
 
       IF (igrid /= auxbas_grid) THEN
-         CALL pw_pool%create_pw(coeff_rspace, use_data=REALDATA3D, &
+         CALL pw_pool_create_pw(pw_pool, coeff_rspace, use_data=REALDATA3D, &
                                 in_space=REALSPACE)
-         CALL pw_pool%create_pw(coeff_gspace, &
+         CALL pw_pool_create_pw(pw_pool, coeff_gspace, &
                                 use_data=COMPLEXDATA1D, &
                                 in_space=RECIPROCALSPACE)
       END IF
@@ -235,11 +238,11 @@ CONTAINS
 
          tot_rs_int = pw_integrate_function(coeff_rspace, isign=-1)
 
-         CALL pw_pool%give_back_pw(coeff_rspace)
-         CALL pw_pool%give_back_pw(coeff_gspace)
+         CALL pw_pool_give_back_pw(pw_pool, coeff_rspace)
+         CALL pw_pool_give_back_pw(pw_pool, coeff_gspace)
       ELSE
 
-         CALL pw_pool%create_pw(rho0_r_tmp, &
+         CALL pw_pool_create_pw(pw_pool, rho0_r_tmp, &
                                 use_data=REALDATA3D, in_space=REALSPACE)
 
          CALL transfer_rs2pw(rs_grid, rho0_r_tmp)
@@ -247,7 +250,7 @@ CONTAINS
          tot_rs_int = pw_integrate_function(rho0_r_tmp, isign=-1)
 
          CALL pw_transfer(rho0_r_tmp, rho0_s_rs)
-         CALL pw_pool%give_back_pw(rho0_r_tmp)
+         CALL pw_pool_give_back_pw(pw_pool, rho0_r_tmp)
 
          CALL pw_zero(rho0_s_gs)
          CALL pw_transfer(rho0_s_rs, rho0_s_gs)
@@ -284,21 +287,21 @@ CONTAINS
 
       ! rho0 density in real space
       IF (ASSOCIATED(rho0_mpole%rho0_s_rs)) THEN
-         CALL rho0_mpole%rho0_s_rs%release()
+         CALL pw_release(rho0_mpole%rho0_s_rs)
       ELSE
          ALLOCATE (rho0_mpole%rho0_s_rs)
       END IF
-      CALL auxbas_pw_pool%create_pw(rho0_mpole%rho0_s_rs, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rho0_mpole%rho0_s_rs, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       ! rho0 density in reciprocal space
       IF (ASSOCIATED(rho0_mpole%rho0_s_gs)) THEN
-         CALL rho0_mpole%rho0_s_gs%release()
+         CALL pw_release(rho0_mpole%rho0_s_gs)
       ELSE
          ALLOCATE (rho0_mpole%rho0_s_gs)
       END IF
-      CALL auxbas_pw_pool%create_pw(rho0_mpole%rho0_s_gs, &
-                                    use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rho0_mpole%rho0_s_gs, &
+                             use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
 
       ! Find the grid level suitable for rho0_soft
       rho0_mpole%igrid_zet0_s = gaussian_gridlevel(pw_env%gridlevel_info, 2.0_dp*rho0_mpole%zet0_h)
@@ -436,27 +439,27 @@ CONTAINS
       rs_desc => rs_descs(igrid)%rs_desc
       pw_pool => pw_pools(igrid)%pool
 
-      CALL pw_pool%create_pw(coeff_gspace, &
+      CALL pw_pool_create_pw(pw_pool, coeff_gspace, &
                              use_data=COMPLEXDATA1D, &
                              in_space=RECIPROCALSPACE)
 
-      CALL pw_pool%create_pw(coeff_rspace, use_data=REALDATA3D, &
+      CALL pw_pool_create_pw(pw_pool, coeff_rspace, use_data=REALDATA3D, &
                              in_space=REALSPACE)
 
       IF (igrid /= auxbas_grid) THEN
          pw_aux => pw_pools(auxbas_grid)%pool
-         CALL pw_aux%create_pw(coeff_gaux, &
-                               use_data=COMPLEXDATA1D, &
-                               in_space=RECIPROCALSPACE)
+         CALL pw_pool_create_pw(pw_aux, coeff_gaux, &
+                                use_data=COMPLEXDATA1D, &
+                                in_space=RECIPROCALSPACE)
          CALL pw_transfer(v_rspace, coeff_gaux)
          CALL pw_copy(coeff_gaux, coeff_gspace)
          CALL pw_transfer(coeff_gspace, coeff_rspace)
-         CALL pw_aux%give_back_pw(coeff_gaux)
-         CALL pw_aux%create_pw(coeff_raux, use_data=REALDATA3D, &
-                               in_space=REALSPACE)
+         CALL pw_pool_give_back_pw(pw_aux, coeff_gaux)
+         CALL pw_pool_create_pw(pw_aux, coeff_raux, use_data=REALDATA3D, &
+                                in_space=REALSPACE)
          fscale = coeff_rspace%pw_grid%dvol/coeff_raux%pw_grid%dvol
          CALL pw_scale(coeff_rspace, fscale)
-         CALL pw_aux%give_back_pw(coeff_raux)
+         CALL pw_pool_give_back_pw(pw_aux, coeff_raux)
       ELSE
 
          IF (coeff_gspace%pw_grid%spherical) THEN
@@ -466,14 +469,14 @@ CONTAINS
             CALL pw_copy(v_rspace, coeff_rspace)
          END IF
       END IF
-      CALL pw_pool%give_back_pw(coeff_gspace)
+      CALL pw_pool_give_back_pw(pw_pool, coeff_gspace)
 
       ! Setup the rs grid at level igrid
       CALL rs_grid_create(rs_v, rs_desc)
       CALL rs_grid_zero(rs_v)
       CALL transfer_pw2rs(rs_v, coeff_rspace)
 
-      CALL pw_pool%give_back_pw(coeff_rspace)
+      CALL pw_pool_give_back_pw(pw_pool, coeff_rspace)
 
       ! Now the potential is on the right grid => integration
 

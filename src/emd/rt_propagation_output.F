@@ -59,7 +59,9 @@ MODULE rt_propagation_output
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_zero
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: COMPLEXDATA1D,&
                                               REALDATA3D,&
                                               REALSPACE,&
@@ -722,8 +724,8 @@ CONTAINS
       END IF
       current_env%gauge = -1
       current_env%gauge_init = .FALSE.
-      CALL auxbas_pw_pool%create_pw(rs, use_data=REALDATA3D, in_space=REALSPACE)
-      CALL auxbas_pw_pool%create_pw(gs, use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rs, use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, gs, use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
 
       NULLIFY (stride)
       ALLOCATE (stride(3))
@@ -760,8 +762,8 @@ CONTAINS
 
       END DO
 
-      CALL auxbas_pw_pool%give_back_pw(rs)
-      CALL auxbas_pw_pool%give_back_pw(gs)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rs)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, gs)
 
       CALL dbcsr_deallocate_matrix(zero)
       CALL dbcsr_deallocate_matrix(tmp)

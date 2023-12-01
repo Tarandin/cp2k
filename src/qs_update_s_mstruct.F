@@ -21,7 +21,8 @@ MODULE qs_update_s_mstruct
                                               kg_tnadd_embed,&
                                               kg_tnadd_embed_ri
    USE pw_methods,                      ONLY: pw_transfer
-   USE pw_types,                        ONLY: pw_type
+   USE pw_types,                        ONLY: pw_release,&
+                                              pw_type
    USE qs_collocate_density,            ONLY: calculate_ppl_grid,&
                                               calculate_rho_core,&
                                               calculate_rho_nlcc
@@ -89,7 +90,7 @@ CONTAINS
                                     qs_env%qs_charges%total_rho_core_rspace, qs_env, only_nopaw=.TRUE.)
          ELSE
             IF (ASSOCIATED(rho_core)) THEN
-               CALL rho_core%release()
+               CALL pw_release(rho_core)
                DEALLOCATE (rho_core)
             END IF
          END IF

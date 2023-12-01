@@ -46,7 +46,9 @@ MODULE qs_electric_field_gradient
                                               pw_transfer
    USE pw_poisson_methods,              ONLY: pw_poisson_solve
    USE pw_poisson_types,                ONLY: pw_poisson_type
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_spline_utils,                 ONLY: &
         Eval_Interp_Spl3_pbc, Eval_d_Interp_Spl3_pbc, find_coeffs, pw_spline_do_precond, &
         pw_spline_precond_create, pw_spline_precond_release, pw_spline_precond_set_kind, &
@@ -157,11 +159,11 @@ CONTAINS
       ELSEIF (ecut == -1._dp .AND. sigma == -1._dp) THEN
          smoothing = .TRUE.
          CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
-         CALL auxbas_pw_pool%create_pw(dvr2rs, &
-                                       use_data=REALDATA3D, in_space=REALSPACE)
+         CALL pw_pool_create_pw(auxbas_pw_pool, dvr2rs, &
+                                use_data=REALDATA3D, in_space=REALSPACE)
          ecut = 2._dp*dvr2rs%pw_grid%cutoff*0.875_dp
          sigma = 2._dp*dvr2rs%pw_grid%cutoff*0.125_dp
-         CALL auxbas_pw_pool%give_back_pw(dvr2rs)
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, dvr2rs)
       ELSE
          smoothing = .TRUE.
       END IF
@@ -211,15 +213,15 @@ CONTAINS
       IF (gapw) CALL prepare_gapw_den(qs_env, do_rho0=.TRUE.)
 
       !calculate electrostatic potential
-      CALL auxbas_pw_pool%create_pw(v_hartree_gspace, &
-                                    use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
-      CALL auxbas_pw_pool%create_pw(rho_tot_gspace, &
-                                    use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, v_hartree_gspace, &
+                             use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rho_tot_gspace, &
+                             use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
       CALL calc_rho_tot_gspace(rho_tot_gspace, qs_env, rho)
 
       CALL pw_poisson_solve(poisson_env, rho_tot_gspace, ehartree, &
                             v_hartree_gspace)
-      CALL auxbas_pw_pool%give_back_pw(rho_tot_gspace)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rho_tot_gspace)
 
       ! smoothing of potential
       IF (smoothing) CALL pw_smoothing(v_hartree_gspace, ecut, sigma)
@@ -227,15 +229,15 @@ CONTAINS
       DO i = 1, 3
          DO j = 1, i
             ij = (i*(i - 1))/2 + j
-            CALL auxbas_pw_pool%create_pw(dvr2(ij), &
-                                          use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+            CALL pw_pool_create_pw(auxbas_pw_pool, dvr2(ij), &
+                                   use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
             CALL pw_dr2(v_hartree_gspace, dvr2(ij), i, j)
          END DO
       END DO
 
       IF (.NOT. efg_interpolation) THEN
-         CALL auxbas_pw_pool%create_pw(structure_factor, &
-                                       use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+         CALL pw_pool_create_pw(auxbas_pw_pool, structure_factor, &
+                                use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
       ELSE
 
          interp_section => section_vals_get_subs_vals(dft_section, &
@@ -247,11 +249,11 @@ CONTAINS
          CALL section_vals_val_get(interp_section, "eps_r", r_val=eps_r)
          CALL section_vals_val_get(interp_section, "eps_x", r_val=eps_x)
 
-         CALL auxbas_pw_pool%create_pw(dvr2rs, &
-                                       use_data=REALDATA3D, in_space=REALSPACE)
+         CALL pw_pool_create_pw(auxbas_pw_pool, dvr2rs, &
+                                use_data=REALDATA3D, in_space=REALSPACE)
          DO i = 1, 6
-            CALL auxbas_pw_pool%create_pw(dvspl(i), &
-                                          use_data=REALDATA3D, in_space=REALSPACE)
+            CALL pw_pool_create_pw(auxbas_pw_pool, dvspl(i), &
+                                   use_data=REALDATA3D, in_space=REALSPACE)
             CALL pw_transfer(dvr2(i), dvr2rs)
             ! calculate spline coefficients
             CALL pw_spline_precond_create(precond, precond_kind=aint_precond, &
@@ -263,9 +265,9 @@ CONTAINS
                                   eps_r=eps_r, eps_x=eps_x, max_iter=max_iter)
             CPASSERT(success)
             CALL pw_spline_precond_release(precond)
-            CALL auxbas_pw_pool%give_back_pw(dvr2(i))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, dvr2(i))
          END DO
-         CALL auxbas_pw_pool%give_back_pw(dvr2rs)
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, dvr2rs)
       END IF
 
       nkind = SIZE(qs_kind_set)
@@ -374,15 +376,15 @@ CONTAINS
          END IF
       END DO
 
-      CALL auxbas_pw_pool%give_back_pw(v_hartree_gspace)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, v_hartree_gspace)
       IF (.NOT. efg_interpolation) THEN
-         CALL auxbas_pw_pool%give_back_pw(structure_factor)
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, structure_factor)
          DO i = 1, 6
-            CALL auxbas_pw_pool%give_back_pw(dvr2(i))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, dvr2(i))
          END DO
       ELSE
          DO i = 1, 6
-            CALL auxbas_pw_pool%give_back_pw(dvspl(i))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, dvspl(i))
          END DO
       END IF
 

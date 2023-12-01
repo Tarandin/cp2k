@@ -50,11 +50,13 @@ MODULE qmmm_image_charge
                                               pw_zero
    USE pw_poisson_methods,              ONLY: pw_poisson_solve
    USE pw_poisson_types,                ONLY: pw_poisson_type
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: COMPLEXDATA1D,&
                                               REALDATA3D,&
                                               REALSPACE,&
                                               RECIPROCALSPACE,&
+                                              pw_release,&
                                               pw_type
    USE qmmm_types_low,                  ONLY: qmmm_env_qm_type
    USE qs_collocate_density,            ONLY: calculate_rho_metal,&
@@ -287,12 +289,12 @@ CONTAINS
          iter_steps = iter_steps + 1
          ! SQRT(rsnew) < 1.0E-08
          IF (rsnew < 1.0E-16) THEN
-            CALL auxpot_Ad_rspace%release()
+            CALL pw_release(auxpot_Ad_rspace)
             EXIT
          END IF
          d = z + rsnew/rsold*d
          rsold = rsnew
-         CALL auxpot_Ad_rspace%release()
+         CALL pw_release(auxpot_Ad_rspace)
       END DO
 
       ! print iteration info
@@ -312,7 +314,7 @@ CONTAINS
          qs_env%calc_image_preconditioner = .TRUE.
       END IF
 
-      CALL v_metal_rspace_guess%release()
+      CALL pw_release(v_metal_rspace_guess)
       DEALLOCATE (pot_const)
       DEALLOCATE (vmetal_const)
       DEALLOCATE (r)
@@ -721,15 +723,18 @@ CONTAINS
 
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, &
                       poisson_env=poisson_env)
-      CALL auxbas_pw_pool%create_pw(rho_gb, &
-                                    use_data=COMPLEXDATA1D, &
-                                    in_space=RECIPROCALSPACE)
-      CALL auxbas_pw_pool%create_pw(vb_gspace, &
-                                    use_data=COMPLEXDATA1D, &
-                                    in_space=RECIPROCALSPACE)
-      CALL auxbas_pw_pool%create_pw(vb_rspace, &
-                                    use_data=REALDATA3D, &
-                                    in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             rho_gb, &
+                             use_data=COMPLEXDATA1D, &
+                             in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             vb_gspace, &
+                             use_data=COMPLEXDATA1D, &
+                             in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             vb_rspace, &
+                             use_data=REALDATA3D, &
+                             in_space=REALSPACE)
 
       ! calculate vb only once for one reference atom
       iatom_ref = 1 !
@@ -753,9 +758,9 @@ CONTAINS
          image_matrix(iatom + 1:natom, iatom) = int_res(iatom + 1:natom)
       END DO
 
-      CALL vb_gspace%release()
-      CALL vb_rspace%release()
-      CALL rho_gb%release()
+      CALL pw_release(vb_gspace)
+      CALL pw_release(vb_rspace)
+      CALL pw_release(rho_gb)
 
       DEALLOCATE (int_res)
 
@@ -890,17 +895,20 @@ CONTAINS
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, &
                       poisson_env=poisson_env)
 
-      CALL auxbas_pw_pool%create_pw(rho_metal, &
-                                    use_data=COMPLEXDATA1D, &
-                                    in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             rho_metal, &
+                             use_data=COMPLEXDATA1D, &
+                             in_space=RECIPROCALSPACE)
 
-      CALL auxbas_pw_pool%create_pw(v_metal_gspace, &
-                                    use_data=COMPLEXDATA1D, &
-                                    in_space=RECIPROCALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             v_metal_gspace, &
+                             use_data=COMPLEXDATA1D, &
+                             in_space=RECIPROCALSPACE)
 
-      CALL auxbas_pw_pool%create_pw(v_metal_rspace, &
-                                    use_data=REALDATA3D, &
-                                    in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, &
+                             v_metal_rspace, &
+                             use_data=REALDATA3D, &
+                             in_space=REALSPACE)
 
       CALL pw_zero(rho_metal)
       CALL calculate_rho_metal(rho_metal, coeff, total_rho_metal=total_rho_metal, &
@@ -922,8 +930,8 @@ CONTAINS
       CALL pw_zero(v_metal_rspace)
       CALL pw_transfer(v_metal_gspace, v_metal_rspace)
       CALL pw_scale(v_metal_rspace, v_metal_rspace%pw_grid%dvol)
-      CALL v_metal_gspace%release()
-      CALL rho_metal%release()
+      CALL pw_release(v_metal_gspace)
+      CALL pw_release(rho_metal)
 
       CALL timestop(handle)
 

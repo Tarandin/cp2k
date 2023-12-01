@@ -58,7 +58,9 @@ MODULE ed_analysis
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_axpy,&
                                               pw_scale
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: REALDATA3D,&
                                               REALSPACE,&
                                               pw_type
@@ -691,18 +693,18 @@ CONTAINS
       needs = xc_functionals_get_needs(xc_fun_section, (nspins == 2), .TRUE.)
 
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
-      CALL auxbas_pw_pool%create_pw(xc_den, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, xc_den, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
       ALLOCATE (vxc(nspins))
       DO ispin = 1, nspins
-         CALL auxbas_pw_pool%create_pw(vxc(ispin), &
-                                       use_data=REALDATA3D, in_space=REALSPACE)
+         CALL pw_pool_create_pw(auxbas_pw_pool, vxc(ispin), &
+                                use_data=REALDATA3D, in_space=REALSPACE)
       END DO
       IF (needs%tau .OR. needs%tau_spin) THEN
          ALLOCATE (vtau(nspins))
          DO ispin = 1, nspins
-            CALL auxbas_pw_pool%create_pw(vtau(ispin), &
-                                          use_data=REALDATA3D, in_space=REALSPACE)
+            CALL pw_pool_create_pw(auxbas_pw_pool, vtau(ispin), &
+                                   use_data=REALDATA3D, in_space=REALSPACE)
          END DO
       END IF
 
@@ -775,13 +777,13 @@ CONTAINS
          END IF
       END IF
 
-      CALL auxbas_pw_pool%give_back_pw(xc_den)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, xc_den)
       DO ispin = 1, nspins
-         CALL auxbas_pw_pool%give_back_pw(vxc(ispin))
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc(ispin))
       END DO
       IF (needs%tau .OR. needs%tau_spin) THEN
          DO ispin = 1, nspins
-            CALL auxbas_pw_pool%give_back_pw(vtau(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, vtau(ispin))
          END DO
       END IF
 

@@ -46,7 +46,8 @@ MODULE qs_ks_types
    USE pw_env_types,                    ONLY: pw_env_release,&
                                               pw_env_retain,&
                                               pw_env_type
-   USE pw_types,                        ONLY: pw_type
+   USE pw_types,                        ONLY: pw_release,&
+                                              pw_type
    USE qs_energy_types,                 ONLY: qs_energy_type
    USE qs_force_types,                  ONLY: qs_force_type
    USE qs_kind_types,                   ONLY: qs_kind_type
@@ -715,7 +716,7 @@ CONTAINS
       TYPE(qs_ks_env_type), INTENT(INOUT)                :: ks_env
 
       IF (ASSOCIATED(ks_env%v_hartree_rspace)) THEN
-         CALL ks_env%v_hartree_rspace%release()
+         CALL pw_release(ks_env%v_hartree_rspace)
          DEALLOCATE (ks_env%v_hartree_rspace)
       END IF
 
@@ -749,23 +750,23 @@ CONTAINS
          CALL deallocate_task_list(ks_env%task_list_soft)
 
       IF (ASSOCIATED(ks_env%rho_nlcc_g)) THEN
-         CALL ks_env%rho_nlcc_g%release()
+         CALL pw_release(ks_env%rho_nlcc_g)
          DEALLOCATE (ks_env%rho_nlcc_g)
       END IF
       IF (ASSOCIATED(ks_env%rho_nlcc)) THEN
-         CALL ks_env%rho_nlcc%release()
+         CALL pw_release(ks_env%rho_nlcc)
          DEALLOCATE (ks_env%rho_nlcc)
       END IF
       IF (ASSOCIATED(ks_env%rho_core)) THEN
-         CALL ks_env%rho_core%release()
+         CALL pw_release(ks_env%rho_core)
          DEALLOCATE (ks_env%rho_core)
       END IF
       IF (ASSOCIATED(ks_env%vppl)) THEN
-         CALL ks_env%vppl%release()
+         CALL pw_release(ks_env%vppl)
          DEALLOCATE (ks_env%vppl)
       END IF
       IF (ASSOCIATED(ks_env%vee)) THEN
-         CALL ks_env%vee%release()
+         CALL pw_release(ks_env%vee)
          DEALLOCATE (ks_env%vee)
       END IF
       IF (ASSOCIATED(ks_env%dbcsr_dist)) THEN
@@ -817,7 +818,7 @@ CONTAINS
       TYPE(qs_ks_env_type), INTENT(INOUT)                :: ks_env
 
       IF (ASSOCIATED(ks_env%v_hartree_rspace)) THEN
-         CALL ks_env%v_hartree_rspace%release()
+         CALL pw_release(ks_env%v_hartree_rspace)
          DEALLOCATE (ks_env%v_hartree_rspace)
       END IF
 
@@ -847,23 +848,23 @@ CONTAINS
          CALL deallocate_task_list(ks_env%task_list_soft)
 
       IF (ASSOCIATED(ks_env%rho_nlcc_g)) THEN
-         CALL ks_env%rho_nlcc_g%release()
+         CALL pw_release(ks_env%rho_nlcc_g)
          DEALLOCATE (ks_env%rho_nlcc_g)
       END IF
       IF (ASSOCIATED(ks_env%rho_nlcc)) THEN
-         CALL ks_env%rho_nlcc%release()
+         CALL pw_release(ks_env%rho_nlcc)
          DEALLOCATE (ks_env%rho_nlcc)
       END IF
       IF (ASSOCIATED(ks_env%rho_core)) THEN
-         CALL ks_env%rho_core%release()
+         CALL pw_release(ks_env%rho_core)
          DEALLOCATE (ks_env%rho_core)
       END IF
       IF (ASSOCIATED(ks_env%vppl)) THEN
-         CALL ks_env%vppl%release()
+         CALL pw_release(ks_env%vppl)
          DEALLOCATE (ks_env%vppl)
       END IF
       IF (ASSOCIATED(ks_env%vee)) THEN
-         CALL ks_env%vee%release()
+         CALL pw_release(ks_env%vee)
          DEALLOCATE (ks_env%vee)
       END IF
 

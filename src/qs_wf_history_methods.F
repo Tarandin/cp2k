@@ -61,7 +61,9 @@ MODULE qs_wf_history_methods
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_copy
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: COMPLEXDATA1D,&
                                               REALDATA3D,&
                                               REALSPACE,&
@@ -194,8 +196,8 @@ CONTAINS
          IF (.NOT. ASSOCIATED(snapshot%rho_r)) THEN
             ALLOCATE (snapshot%rho_r(nspins))
             DO ispin = 1, nspins
-               CALL auxbas_pw_pool%create_pw(snapshot%rho_r(ispin), &
-                                             in_space=REALSPACE, use_data=REALDATA3D)
+               CALL pw_pool_create_pw(auxbas_pw_pool, snapshot%rho_r(ispin), &
+                                      in_space=REALSPACE, use_data=REALDATA3D)
             END DO
          END IF
          DO ispin = 1, nspins
@@ -203,7 +205,7 @@ CONTAINS
          END DO
       ELSE IF (ASSOCIATED(snapshot%rho_r)) THEN
          DO ispin = 1, SIZE(snapshot%rho_r)
-            CALL auxbas_pw_pool%give_back_pw(snapshot%rho_r(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, snapshot%rho_r(ispin))
          END DO
          DEALLOCATE (snapshot%rho_r)
       END IF
@@ -214,8 +216,8 @@ CONTAINS
          IF (.NOT. ASSOCIATED(snapshot%rho_g)) THEN
             ALLOCATE (snapshot%rho_g(nspins))
             DO ispin = 1, nspins
-               CALL auxbas_pw_pool%create_pw(snapshot%rho_g(ispin), &
-                                             in_space=RECIPROCALSPACE, use_data=COMPLEXDATA1D)
+               CALL pw_pool_create_pw(auxbas_pw_pool, snapshot%rho_g(ispin), &
+                                      in_space=RECIPROCALSPACE, use_data=COMPLEXDATA1D)
             END DO
          END IF
          DO ispin = 1, nspins
@@ -223,7 +225,7 @@ CONTAINS
          END DO
       ELSE IF (ASSOCIATED(snapshot%rho_g)) THEN
          DO ispin = 1, SIZE(snapshot%rho_g)
-            CALL auxbas_pw_pool%give_back_pw(snapshot%rho_g(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, snapshot%rho_g(ispin))
          END DO
          DEALLOCATE (snapshot%rho_g)
       END IF

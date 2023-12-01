@@ -45,9 +45,12 @@ MODULE hirshfeld_methods
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_integrate_function
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: REALDATA3D,&
                                               REALSPACE,&
+                                              pw_release,&
                                               pw_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -292,7 +295,7 @@ CONTAINS
       CALL get_qs_env(qs_env=qs_env, pw_env=pw_env, rho=rho)
       CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid)
       CALL pw_env_get(pw_env=pw_env, auxbas_pw_pool=auxbas_pw_pool)
-      CALL auxbas_pw_pool%create_pw(rhonorm, use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhonorm, use_data=REALDATA3D, in_space=REALSPACE)
       ! loop over spins
       DO is = 1, SIZE(rho_r)
          IF (rho_r_valid) THEN
@@ -304,7 +307,7 @@ CONTAINS
          CALL hirshfeld_integration(qs_env, hirshfeld_env, rhonorm, charges(:, is))
          charges(:, is) = charges(:, is)*hirshfeld_env%charges(:)
       END DO
-      CALL auxbas_pw_pool%give_back_pw(rhonorm)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhonorm)
 
    END SUBROUTINE comp_hirshfeld_charges
 ! **************************************************************************************************
@@ -380,7 +383,7 @@ CONTAINS
       CALL get_qs_env(qs_env=qs_env, pw_env=pw_env, rho=rho)
       CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid)
       CALL pw_env_get(pw_env=pw_env, auxbas_pw_pool=auxbas_pw_pool)
-      CALL auxbas_pw_pool%create_pw(rhonorm, use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhonorm, use_data=REALDATA3D, in_space=REALSPACE)
       !
       DO iloop = 1, maxloop
 
@@ -419,7 +422,7 @@ CONTAINS
 
       END DO
       !
-      CALL auxbas_pw_pool%give_back_pw(rhonorm)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhonorm)
 
    END SUBROUTINE comp_hirshfeld_i_charges
 
@@ -517,11 +520,11 @@ CONTAINS
       NULLIFY (fnorm)
       CALL get_hirshfeld_info(hirshfeld_env, fnorm=fnorm)
       IF (ASSOCIATED(fnorm)) THEN
-         CALL fnorm%release()
+         CALL pw_release(fnorm)
          DEALLOCATE (fnorm)
       END IF
       ALLOCATE (fnorm)
-      CALL auxbas_pw_pool%create_pw(fnorm, use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, fnorm, use_data=REALDATA3D, in_space=REALSPACE)
       CALL set_hirshfeld_info(hirshfeld_env, fnorm=fnorm)
 
       CALL transfer_rs2pw(rs_rho, fnorm)

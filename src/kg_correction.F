@@ -40,7 +40,8 @@ MODULE kg_correction
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_integral_ab,&
                                               pw_scale
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: pw_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -262,7 +263,7 @@ CONTAINS
          CALL integrate_v_rspace(v_rspace=vxc_rho(ispin), &
                                  pmat=density_matrix(ispin), hmat=ks_matrix(ispin), &
                                  qs_env=qs_env, calculate_forces=calc_force)
-         CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
       END DO
       DEALLOCATE (vxc_rho)
       ekin_mol = -ekin_imol
@@ -336,7 +337,7 @@ CONTAINS
                                     calculate_forces=calc_force, &
                                     task_list_external=kg_env%subset(isub)%task_list)
             ! clean up vxc_rho
-            CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
             IF (ASSOCIATED(vxc_tau)) THEN
                CALL pw_scale(vxc_tau(ispin), -alpha*vxc_tau(ispin)%pw_grid%dvol)
                CALL integrate_v_rspace(v_rspace=vxc_tau(ispin), &
@@ -347,7 +348,7 @@ CONTAINS
                                        calculate_forces=calc_force, &
                                        task_list_external=kg_env%subset(isub)%task_list)
                ! clean up vxc_rho
-               CALL auxbas_pw_pool%give_back_pw(vxc_tau(ispin))
+               CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_tau(ispin))
             END IF
          END DO
          DEALLOCATE (vxc_rho)
@@ -476,7 +477,7 @@ CONTAINS
          CALL pw_scale(vxc_rho(ispin), vxc_rho(ispin)%pw_grid%dvol)
          lri_v_int => lri_density%lri_coefs(ispin)%lri_kinds
          CALL integrate_v_rspace_one_center(vxc_rho(ispin), qs_env, lri_v_int, calc_force, "LRI_AUX")
-         CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
       END DO
       DEALLOCATE (vxc_rho)
       ekin_mol = -ekin_imol
@@ -506,7 +507,7 @@ CONTAINS
                                                lri_v_int, calc_force, &
                                                "LRI_AUX", atomlist=atomlist)
             ! clean up vxc_rho
-            CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
          END DO
          DEALLOCATE (vxc_rho)
 
@@ -719,7 +720,7 @@ CONTAINS
             lri_v_int => lri_density%lri_coefs(ispin)%lri_kinds
          END IF
          CALL integrate_v_rspace_one_center(vxc_rho(ispin), qs_env, lri_v_int, calc_force, "LRI_AUX")
-         CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
       END DO
 
       DEALLOCATE (vxc_rho)
@@ -788,7 +789,7 @@ CONTAINS
                                                lri_v_int, calc_force, &
                                                "LRI_AUX", atomlist=atomlist)
             ! clean up vxc_rho
-            CALL auxbas_pw_pool%give_back_pw(vxc_rho(ispin))
+            CALL pw_pool_give_back_pw(auxbas_pw_pool, vxc_rho(ispin))
          END DO
          DEALLOCATE (vxc_rho)
 

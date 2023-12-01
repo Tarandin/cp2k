@@ -10,6 +10,7 @@ MODULE qs_tddfpt2_soc_types
    USE cp_fm_types,                     ONLY: cp_fm_release,&
                                               cp_fm_type
    USE dbcsr_api,                       ONLY: dbcsr_p_type,&
+                                              dbcsr_type,&
                                               dbcsr_release
    USE kinds,                           ONLY: dp
    USE libint_wrapper,                  ONLY: cp_libint_static_cleanup
@@ -49,6 +50,7 @@ MODULE qs_tddfpt2_soc_types
    TYPE soc_env_type
       !! a :: singlet or spin-conserving b :: triplet or spin flip
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: orb_soc => Null()
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: dipmat_ao => Null()
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: dipmat => Null()
       REAL(dp), POINTER, DIMENSION(:)                 :: evals_a => Null(), &
                                                          evals_b => Null()
@@ -86,7 +88,7 @@ CONTAINS
       NULLIFY (soc_env%orb_soc)
       NULLIFY (soc_env%evals_a)
       NULLIFY (soc_env%evals_b)
-      NULLIFY (soc_env%dipmat)
+      NULLIFY (soc_env%dipmat, soc_env%dipmat_ao)
 
    END SUBROUTINE soc_env_create
 
@@ -117,6 +119,13 @@ CONTAINS
             DEALLOCATE (soc_env%dipmat(i)%matrix)
          END DO
          DEALLOCATE (soc_env%dipmat)
+      END IF
+      IF (ASSOCIATED(soc_env%dipmat_ao)) THEN
+         DO i = 1, SIZE(soc_env%dipmat_ao)
+            CALL dbcsr_release(soc_env%dipmat_ao(i)%matrix)
+            DEALLOCATE (soc_env%dipmat_ao(i)%matrix)
+         END DO
+         DEALLOCATE (soc_env%dipmat_ao)
       END IF
       IF (ALLOCATED(soc_env%soc_evals)) DEALLOCATE (soc_env%soc_evals)
       IF (ALLOCATED(soc_env%soc_osc)) DEALLOCATE (soc_env%soc_osc)

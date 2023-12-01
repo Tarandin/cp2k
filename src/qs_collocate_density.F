@@ -80,7 +80,9 @@ MODULE qs_collocate_density
                                               pw_integrate_function,&
                                               pw_transfer,&
                                               pw_zero
-   USE pw_pool_types,                   ONLY: pw_pool_p_type,&
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_p_type,&
                                               pw_pool_type,&
                                               pw_pools_create_pws,&
                                               pw_pools_give_back_pws
@@ -145,7 +147,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE calculate_rho_nlcc(rho_nlcc, qs_env)
 
-      TYPE(pw_type), INTENT(INOUT)                       :: rho_nlcc
+      TYPE(pw_type), INTENT(IN)                          :: rho_nlcc
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'calculate_rho_nlcc'
@@ -324,7 +326,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE calculate_ppl_grid(vppl, qs_env)
 
-      TYPE(pw_type), INTENT(INOUT)                       :: vppl
+      TYPE(pw_type), INTENT(IN)                          :: vppl
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'calculate_ppl_grid'
@@ -890,8 +892,8 @@ CONTAINS
       END IF
       DEALLOCATE (pab)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
@@ -899,7 +901,7 @@ CONTAINS
 
       CALL pw_transfer(rhoc_r, rho_core)
 
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 
@@ -1025,14 +1027,14 @@ CONTAINS
       END IF
       DEALLOCATE (pab)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
       CALL pw_transfer(rhoc_r, drho_core)
 
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 
@@ -1114,14 +1116,14 @@ CONTAINS
 
       DEALLOCATE (pab)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
       CALL pw_transfer(rhoc_r, rho_gb)
 
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 
@@ -1219,8 +1221,8 @@ CONTAINS
 
       DEALLOCATE (pab, cores)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
@@ -1229,7 +1231,7 @@ CONTAINS
          total_rho_metal = pw_integrate_function(rhoc_r, isign=-1)
 
       CALL pw_transfer(rhoc_r, rho_metal)
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 
@@ -1313,14 +1315,14 @@ CONTAINS
 
       DEALLOCATE (pab)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
       CALL pw_transfer(rhoc_r, rho_gb)
 
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 
@@ -1418,13 +1420,13 @@ CONTAINS
 
       DEALLOCATE (pab, cores)
 
-      CALL auxbas_pw_pool%create_pw(rhoc_r, &
-                                    use_data=REALDATA3D, in_space=REALSPACE)
+      CALL pw_pool_create_pw(auxbas_pw_pool, rhoc_r, &
+                             use_data=REALDATA3D, in_space=REALSPACE)
 
       CALL transfer_rs2pw(rs_rho, rhoc_r)
 
       CALL pw_transfer(rhoc_r, rho_resp)
-      CALL auxbas_pw_pool%give_back_pw(rhoc_r)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, rhoc_r)
 
       CALL timestop(handle)
 

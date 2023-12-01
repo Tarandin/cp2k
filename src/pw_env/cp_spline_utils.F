@@ -18,7 +18,9 @@ MODULE cp_spline_utils
    USE pw_methods,                      ONLY: do_standard_sum,&
                                               pw_axpy,&
                                               pw_zero
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_spline_utils,                 ONLY: &
         add_coarse2fine, add_fine2coarse, find_coeffs, pw_spline_do_precond, &
         pw_spline_precond_create, pw_spline_precond_release, pw_spline_precond_set_kind, &
@@ -91,8 +93,8 @@ CONTAINS
       pbc = (interp_kind == spline3_pbc_interp)
       CPASSERT(pbc .OR. interp_kind == spline3_nopbc_interp)
       bo = pw_coarse_out%pw_grid%bounds_local
-      CALL coarse_pool%create_pw(values, use_data=REALDATA3D, &
-                                 in_space=REALSPACE)
+      CALL pw_pool_create_pw(coarse_pool, values, use_data=REALDATA3D, &
+                             in_space=REALSPACE)
       CALL pw_zero(values)
 
       CALL add_fine2coarse(fine_values_pw=pw_fine_in, &
@@ -101,8 +103,8 @@ CONTAINS
                            w_border1=spl3_1d_transf_border1/2._dp, pbc=pbc, &
                            safe_computation=safe_computation)
 
-      CALL coarse_pool%create_pw(coeffs, use_data=REALDATA3D, &
-                                 in_space=REALSPACE)
+      CALL pw_pool_create_pw(coarse_pool, coeffs, use_data=REALDATA3D, &
+                             in_space=REALSPACE)
       CALL pw_spline_precond_create(precond, precond_kind=aint_precond, &
                                     pool=coarse_pool, pbc=pbc, transpose=.TRUE.)
       CALL pw_spline_do_precond(precond, values, coeffs)
@@ -121,8 +123,8 @@ CONTAINS
       CALL pw_zero(pw_coarse_out)
       CALL pw_axpy(coeffs, pw_coarse_out)
 
-      CALL coarse_pool%give_back_pw(values)
-      CALL coarse_pool%give_back_pw(coeffs)
+      CALL pw_pool_give_back_pw(coarse_pool, values)
+      CALL pw_pool_give_back_pw(coarse_pool, coeffs)
       CALL timestop(handle)
 
    END SUBROUTINE pw_restrict_s3
@@ -156,8 +158,8 @@ CONTAINS
 
       ifile = ifile + 1
       CALL timeset(routineN, handle)
-      CALL coarse_pool%create_pw(coeffs, use_data=REALDATA3D, &
-                                 in_space=REALSPACE)
+      CALL pw_pool_create_pw(coarse_pool, coeffs, use_data=REALDATA3D, &
+                             in_space=REALSPACE)
       bo = pw_coarse_in%pw_grid%bounds_local
       CALL section_vals_val_get(param_section, "safe_computation", &
                                 l_val=safe_computation)
@@ -201,7 +203,7 @@ CONTAINS
                            w_border1=spl3_1d_transf_border1, &
                            pbc=pbc, safe_computation=safe_computation)
 
-      CALL coarse_pool%give_back_pw(coeffs)
+      CALL pw_pool_give_back_pw(coarse_pool, coeffs)
 
       CALL timestop(handle)
 

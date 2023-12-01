@@ -38,6 +38,7 @@ MODULE pw_types
 
    PRIVATE
    PUBLIC :: pw_type, pw_p_type
+   PUBLIC :: pw_release, pw_create
 
    ! Flags for the structure member 'in_use'
    ! NODATA only for internal use, we enforce a certain data type
@@ -61,9 +62,6 @@ MODULE pw_types
       INTEGER :: in_space = NOSPACE ! Real/Reciprocal space
 
       TYPE(pw_grid_type), POINTER :: pw_grid => NULL()
-   CONTAINS
-      PROCEDURE, PUBLIC, NON_OVERRIDABLE :: create => pw_create
-      PROCEDURE, PUBLIC, NON_OVERRIDABLE :: release => pw_release
    END TYPE pw_type
 
 ! **************************************************************************************************
@@ -86,7 +84,7 @@ CONTAINS
 !>      see doc/ReferenceCounting.html
 ! **************************************************************************************************
    SUBROUTINE pw_release(pw)
-      CLASS(pw_type), INTENT(INOUT)                       :: pw
+      TYPE(pw_type), INTENT(INOUT)                       :: pw
 
       SELECT CASE (pw%in_use)
       CASE (REALDATA1D)
@@ -120,7 +118,7 @@ CONTAINS
 !> \author fawzi
 ! **************************************************************************************************
    SUBROUTINE pw_create(pw, pw_grid, use_data, in_space, cr3d_ptr)
-      CLASS(pw_type), INTENT(INOUT)                         :: pw
+      TYPE(pw_type), INTENT(OUT)                         :: pw
       TYPE(pw_grid_type), INTENT(IN), POINTER            :: pw_grid
       INTEGER, INTENT(in)                                :: use_data, in_space
       REAL(KIND=dp), CONTIGUOUS, DIMENSION(:, :, :), &
@@ -152,9 +150,6 @@ CONTAINS
             CPASSERT(use_data == REALDATA3D)
          END IF
       END IF
-
-      ! Ensure a clean grid to prevent memory leaks
-      CALL pw%release()
 
       pw%in_use = use_data
       pw%pw_grid => pw_grid

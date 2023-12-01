@@ -12,57 +12,57 @@
 !> \author MI
 ! **************************************************************************************************
 MODULE input_cp2k_properties_dft
-   USE bibliography, ONLY: Futera2017, &
-                           Iannuzzi2005, &
-                           Kondov2007, &
-                           Luber2014, &
-                           Putrino2000, &
-                           Putrino2002, &
-                           Sebastiani2001, &
-                           Weber2009
-   USE cp_output_handling, ONLY: add_last_numeric, &
-                                 cp_print_key_section_create, &
-                                 debug_print_level, &
-                                 high_print_level, &
-                                 low_print_level, &
-                                 medium_print_level, &
-                                 silent_print_level
-   USE cp_units, ONLY: cp_unit_to_cp2k
-   USE input_constants, ONLY: &
-      current_gauge_atom, current_gauge_r, current_gauge_r_and_step_func, &
-      current_orb_center_atom, current_orb_center_box, current_orb_center_common, &
-      current_orb_center_wannier, do_et_ddapc, do_full_density, do_no_et, do_spin_density, &
-      gto_cartesian, gto_spherical, int_ldos_none, int_ldos_x, int_ldos_y, int_ldos_z, oe_gllb, &
-      oe_lb, oe_none, oe_saop, oe_shift, ot_precond_full_all, ot_precond_full_kinetic, &
-      ot_precond_full_single, ot_precond_full_single_inverse, ot_precond_none, &
-      ot_precond_s_inverse, scan_x, scan_xy, scan_xyz, scan_xz, scan_y, scan_yz, scan_z, &
-      tddfpt_dipole_berry, tddfpt_dipole_length, tddfpt_dipole_velocity, tddfpt_kernel_full, &
-      tddfpt_kernel_none, tddfpt_kernel_stda, use_mom_ref_coac, use_mom_ref_com, &
-      use_mom_ref_user, use_mom_ref_zero
-   USE input_cp2k_atprop, ONLY: create_atprop_section
-   USE input_cp2k_dft, ONLY: create_ddapc_restraint_section, &
-                             create_interp_section, &
-                             create_lrigpw_section, &
-                             create_mgrid_section
-   USE input_cp2k_kpoints, ONLY: create_kpoint_set_section
-   USE input_cp2k_loc, ONLY: create_localize_section
-   USE input_cp2k_resp, ONLY: create_resp_section
-   USE input_cp2k_xc, ONLY: create_xc_section
-   USE input_keyword_types, ONLY: keyword_create, &
-                                  keyword_release, &
-                                  keyword_type
-   USE input_section_types, ONLY: section_add_keyword, &
-                                  section_add_subsection, &
-                                  section_create, &
-                                  section_release, &
-                                  section_type
-   USE input_val_types, ONLY: char_t, &
-                              integer_t, &
-                              lchar_t, &
-                              logical_t, &
-                              real_t
-   USE kinds, ONLY: dp
-   USE string_utilities, ONLY: s2a
+   USE bibliography,                    ONLY: Futera2017,&
+                                              Iannuzzi2005,&
+                                              Kondov2007,&
+                                              Luber2014,&
+                                              Putrino2000,&
+                                              Putrino2002,&
+                                              Sebastiani2001,&
+                                              Weber2009
+   USE cp_output_handling,              ONLY: add_last_numeric,&
+                                              cp_print_key_section_create,&
+                                              debug_print_level,&
+                                              high_print_level,&
+                                              low_print_level,&
+                                              medium_print_level,&
+                                              silent_print_level
+   USE cp_units,                        ONLY: cp_unit_to_cp2k
+   USE input_constants,                 ONLY: &
+        current_gauge_atom, current_gauge_r, current_gauge_r_and_step_func, &
+        current_orb_center_atom, current_orb_center_box, current_orb_center_common, &
+        current_orb_center_wannier, do_et_ddapc, do_full_density, do_no_et, do_spin_density, &
+        gto_cartesian, gto_spherical, int_ldos_none, int_ldos_x, int_ldos_y, int_ldos_z, oe_gllb, &
+        oe_lb, oe_none, oe_saop, oe_shift, ot_precond_full_all, ot_precond_full_kinetic, &
+        ot_precond_full_single, ot_precond_full_single_inverse, ot_precond_none, &
+        ot_precond_s_inverse, scan_x, scan_xy, scan_xyz, scan_xz, scan_y, scan_yz, scan_z, &
+        tddfpt_dipole_berry, tddfpt_dipole_length, tddfpt_dipole_velocity, tddfpt_kernel_full, &
+        tddfpt_kernel_none, tddfpt_kernel_stda, use_mom_ref_coac, use_mom_ref_com, &
+        use_mom_ref_user, use_mom_ref_zero
+   USE input_cp2k_atprop,               ONLY: create_atprop_section
+   USE input_cp2k_dft,                  ONLY: create_ddapc_restraint_section,&
+                                              create_interp_section,&
+                                              create_lrigpw_section,&
+                                              create_mgrid_section
+   USE input_cp2k_kpoints,              ONLY: create_kpoint_set_section
+   USE input_cp2k_loc,                  ONLY: create_localize_section
+   USE input_cp2k_resp,                 ONLY: create_resp_section
+   USE input_cp2k_xc,                   ONLY: create_xc_section
+   USE input_keyword_types,             ONLY: keyword_create,&
+                                              keyword_release,&
+                                              keyword_type
+   USE input_section_types,             ONLY: section_add_keyword,&
+                                              section_add_subsection,&
+                                              section_create,&
+                                              section_release,&
+                                              section_type
+   USE input_val_types,                 ONLY: char_t,&
+                                              integer_t,&
+                                              lchar_t,&
+                                              logical_t,&
+                                              real_t
+   USE kinds,                           ONLY: dp
+   USE string_utilities,                ONLY: s2a
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -93,7 +93,7 @@ CONTAINS
 
       NULLIFY (subsection, keyword)
 
-      CALL create_linres_section(subsection, create_subsections=.TRUE.)
+      CALL create_linres_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
@@ -144,35 +144,15 @@ CONTAINS
 !>      a linear response calculation
 !>      Available properties : none
 !> \param section the section to create
-!> \param create_subsections indicates whether or not subsections should be created
-!> \param default_set_tdlr default parameters to be used if called from TDDFPT
 !> \author MI
 ! **************************************************************************************************
-   SUBROUTINE create_linres_section(section, create_subsections, default_set_tdlr)
+   SUBROUTINE create_linres_section(section)
       TYPE(section_type), POINTER                        :: section
-      LOGICAL, INTENT(in)                                :: create_subsections
-      LOGICAL, INTENT(IN), OPTIONAL                      :: default_set_tdlr
 
-      INTEGER                                            :: def_max_iter, def_precond
-      REAL(KIND=DP)                                      :: def_egap, def_eps, def_eps_filter
       TYPE(keyword_type), POINTER                        :: keyword
       TYPE(section_type), POINTER                        :: print_key, subsection
 
-      NULLIFY (keyword, print_key)
-
-      IF (PRESENT(default_set_tdlr)) THEN
-         def_egap = 0.02_dp
-         def_eps = 1.0e-10_dp
-         def_eps_filter = 1.0e-15_dp
-         def_max_iter = 100
-         def_precond = ot_precond_full_single_inverse
-      ELSE
-         def_egap = 0.2_dp
-         def_eps = 1.e-6_dp
-         def_eps_filter = 0.0_dp
-         def_max_iter = 50
-         def_precond = ot_precond_none
-      END IF
+      NULLIFY (keyword, subsection, print_key)
 
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="linres", &
@@ -183,19 +163,19 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="EPS", &
                           description="target accuracy for the convergence of the conjugate gradient.", &
-                          usage="EPS 1.e-6", default_r_val=def_eps)
+                          usage="EPS 1.e-6", default_r_val=1.e-6_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="EPS_FILTER", &
                           description="Filter threshold for response density matrix.", &
-                          usage="EPS 1.e-8", default_r_val=def_eps_filter)
+                          usage="EPS 1.e-8", default_r_val=0.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="MAX_ITER", &
                           description="Maximum number of conjugate gradient iteration to be performed for one optimization.", &
-                          usage="MAX_ITER 200", default_i_val=def_max_iter)
+                          usage="MAX_ITER 200", default_i_val=50)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -211,7 +191,7 @@ CONTAINS
          "They differ in effectiveness, cost of construction, cost of application. "// &
          "Properly preconditioned minimization can be orders of magnitude faster than doing nothing.", &
          usage="PRECONDITIONER FULL_ALL", &
-         default_i_val=def_precond, &
+         default_i_val=ot_precond_none, &
          enum_c_vals=s2a("FULL_ALL", "FULL_SINGLE_INVERSE", "FULL_SINGLE", "FULL_KINETIC", "FULL_S_INVERSE", &
                          "NONE"), &
          enum_desc=s2a("Most effective state selective preconditioner based on diagonalization, "// &
@@ -234,7 +214,7 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="ENERGY_GAP", &
                           description="Energy gap estimate [a.u.] for preconditioning", &
                           usage="ENERGY_GAP 0.1", &
-                          default_r_val=def_egap)
+                          default_r_val=0.2_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -254,67 +234,62 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      IF (create_subsections) THEN
-         NULLIFY (subsection)
+      CALL create_localize_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_localize_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_current_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_current_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_nmr_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_nmr_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_spin_spin_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_spin_spin_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_epr_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_epr_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_polarizability_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_polarizability_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_dcdr_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_dcdr_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL create_vcd_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
-         CALL create_vcd_section(subsection)
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
+      CALL section_create(subsection, __LOCATION__, name="PRINT", &
+                          description="printing of information during the linear response calculation", &
+                          repeats=.FALSE.)
 
-         CALL section_create(subsection, __LOCATION__, name="PRINT", &
-                             description="printing of information during the linear response calculation", &
-                             repeats=.FALSE.)
+      CALL cp_print_key_section_create( &
+         print_key, __LOCATION__, "program_run_info", &
+         description="Controls the printing of basic iteration information during the LINRES calculation", &
+         print_level=low_print_level, add_last=add_last_numeric, filename="__STD_OUT__")
+      CALL section_add_subsection(subsection, print_key)
+      CALL section_release(print_key)
 
-         CALL cp_print_key_section_create( &
-            print_key, __LOCATION__, "program_run_info", &
-            description="Controls the printing of basic iteration information during the LINRES calculation", &
-            print_level=low_print_level, add_last=add_last_numeric, filename="__STD_OUT__")
-         CALL section_add_subsection(subsection, print_key)
-         CALL section_release(print_key)
+      CALL cp_print_key_section_create(print_key, __LOCATION__, "RESTART", &
+                                       description="Controls the dumping of restart file of the response wavefunction. "// &
+                                       "For each set of response functions, i.e. for each perturbation, "// &
+                                       "one different restart file is dumped. These restart files should be "// &
+                                       "employed only to restart the same type of LINRES calculation, "// &
+                                       "i.e. with the same perturbation.", &
+                                       print_level=low_print_level, common_iter_levels=3, each_iter_names=s2a("ITER"), &
+                                       add_last=add_last_numeric, each_iter_values=(/3/), filename="")
+      CALL section_add_subsection(subsection, print_key)
+      CALL section_release(print_key)
 
-         CALL cp_print_key_section_create(print_key, __LOCATION__, "RESTART", &
-                                          description="Controls the dumping of restart file of the response wavefunction. "// &
-                                          "For each set of response functions, i.e. for each perturbation, "// &
-                                          "one different restart file is dumped. These restart files should be "// &
-                                          "employed only to restart the same type of LINRES calculation, "// &
-                                          "i.e. with the same perturbation.", &
-                                          print_level=low_print_level, common_iter_levels=3, each_iter_names=s2a("ITER"), &
-                                          add_last=add_last_numeric, each_iter_values=(/3/), filename="")
-         CALL section_add_subsection(subsection, print_key)
-         CALL section_release(print_key)
-
-         CALL section_add_subsection(section, subsection)
-         CALL section_release(subsection)
-
-      END IF
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
    END SUBROUTINE create_linres_section
 
@@ -1681,11 +1656,6 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
-      ! LINRES section
-      CALL create_linres_section(subsection, create_subsections=.FALSE., default_set_tdlr=.TRUE.)
-      CALL section_add_subsection(section, subsection)
-      CALL section_release(subsection)
-
       ! PRINT subsection
       CALL section_create(subsection, __LOCATION__, name="PRINT", &
                           description="Printing of information during the TDDFT run.", repeats=.FALSE.)
@@ -1855,7 +1825,7 @@ CONTAINS
 
       CALL cp_print_key_section_create(print_key, __LOCATION__, name="FORCES", &
                                        description="Controls the calculation and printing of excited state forces. "// &
-                                       "This needs a RUN_TYPE that includes force evaluation, e.g. ENERGY_FORCE", &
+                                       "Prints difference in forces between excited state and ground state!", &
                                        print_level=debug_print_level, filename="TDFORCE")
       CALL keyword_create(keyword, __LOCATION__, name="LIST", &
                           description="Specifies a list of states for the force calculations.", &
@@ -2007,6 +1977,10 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL create_local_vbm_cbm_gap_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
    END SUBROUTINE create_bandstructure_section
 
 ! **************************************************************************************************
@@ -2082,13 +2056,13 @@ CONTAINS
                           "`MEMORY_PER_PROC` = mem_per_node / n_MPI_proc_per_node "// &
                           "(typically between 2 GB and 50 GB). Unit of keyword: Gigabyte (GB).", &
                           usage="MEMORY_PER_PROC 16", &
-                          default_r_val=2.0_dp)
+                          default_i_val=2)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="APPROX_KP_EXTRAPOL", &
                           description="If true, use only a 4x4 kpoint mesh for frequency "// &
-                          "points $\omega_j, j \ge 2$ (instead of a 4x4 and 6x6 k-point mesh). "// &
+                          "points $\omega_j, j >= 2$ (instead of a 4x4 and 6x6 k-point mesh). "// &
                           "The k-point extrapolation of $W_{PQ}(i\omega_j,\mathbf{q})$ "// &
                           "is done approximately from $W_{PQ}(i\omega_1,\mathbf{q})$.", &
                           usage="APPROX_KP_EXTRAPOL", &
@@ -2168,7 +2142,6 @@ CONTAINS
       TYPE(section_type), POINTER                        :: section
 
       TYPE(keyword_type), POINTER                        :: keyword
-      TYPE(section_type), POINTER                        :: subsection
 
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="DOS", &
@@ -2200,7 +2173,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="ENERGY_STEP", &
-                          description="Resolution of the energy E when computing the $\rho(E)$.", &
+                          description="Resolution of the energy E when computing the DOS(E).", &
                           usage="ENERGY_STEP 0.01", &
                           default_r_val=cp_unit_to_cp2k(value=0.01_dp, unit_str="eV"), &
                           unit_str="eV")
@@ -2209,7 +2182,8 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="BROADENING", &
                           description="Broadening α in Gaussians used in the DOS; "// &
-                          "$\rho(E) = \sum_n \exp(((E-\varepsilon_n)/\alpha)^2)/("// &
+                          "$\mathrm{DOS}(E) = "// &
+                          "\sum_n \exp(((E-\varepsilon_n)/\alpha)^2)/("// &
                           " \sqrt{2\pi} \alpha)$.", &
                           usage="BROADENING 0.01", &
                           default_r_val=cp_unit_to_cp2k(value=0.01_dp, unit_str="eV"), &
@@ -2232,34 +2206,31 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      NULLIFY (subsection)
-      CALL create_ldos_section(subsection)
-      CALL section_add_subsection(section, subsection)
-      CALL section_release(subsection)
-
    END SUBROUTINE create_dos_section
 
 ! **************************************************************************************************
 !> \brief ...
 !> \param section ...
 ! **************************************************************************************************
-   SUBROUTINE create_ldos_section(section)
+   SUBROUTINE create_local_vbm_cbm_gap_section(section)
       TYPE(section_type), POINTER                        :: section
 
       TYPE(keyword_type), POINTER                        :: keyword
 
       CPASSERT(.NOT. ASSOCIATED(section))
-      CALL section_create(section, __LOCATION__, name="LDOS", &
-                          description="Parameters needed to calculate the local density "// &
-                          "of states (LDOS).  "// &
-                          "The LDOS is computed as $\rho(\mathbf{r},E) = "// &
-                          "\sum\limits_{n,\mathbf{k}}"// &
-                          " |\psi_{n\mathbf{k}}(r)|^2\, w_\mathbf{k}\, g(E-\varepsilon_{n\mathbf{k}})$ "// &
+      CALL section_create(section, __LOCATION__, name="LOCAL_VBM_CBM_GAP", &
+                          description="Parameters needed to calculate the local valence band "// &
+                          "maximum (VBM), the local conduction band minimum (CBM) and the "// &
+                          "local band gap. The local VBM is defined as E_VBM(r) = "// &
+                          "max{ E: ρ(r,E) > α ρ_0(r), E_VBM-E_window/2 < E < E_VBM }, where "// &
+                          "ρ_0(r) = int_(E_VBM - E_window/2)^E_VBM ρ(r,E) dE /(E_window/2), "// &
+                          "ρ(r,E) is the local density of states (LDOS), E_VBM the VBM "// &
+                          "from the band structure and E_window is defined in this section. "// &
+                          "The LDOS is computed as ρ(r,E) = sum_n,k |ψ_nk(r)|^2 w_k g(E-ε_n) "// &
                           "using the Gaussian weight function "// &
-                          "$g(x) = \exp(x^2/\alpha^2)/(\sqrt{2\pi}\alpha)$, $\alpha$ is the broadening "// &
-                          "from the &DOS section, and the k-point weight "// &
-                          "$w_\mathbf{k}$. The k-mesh is taken from the &DOS section.", &
-                          n_keywords=2, repeats=.FALSE.)
+                          "G(E-ε_n) = 1/(α sqrt(2π)) exp(((E-ε_n)/α)^2) and the k-point weight "// &
+                          "w_k. The k-mesh is taken from the &DOS_PDOS section.", &
+                          n_keywords=1, n_subsections=1, repeats=.FALSE.)
 
       NULLIFY (keyword)
       CALL keyword_create(keyword, __LOCATION__, &
@@ -2271,9 +2242,11 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="INTEGRATION", &
-                          description="Defines whether the LDOS is integrated along a "// &
-                          "coordinate. As an example, for INTEGRATION Z, the LDOS "// &
-                          "$\rho(x,y,E) = \int dz\, \rho(x,y,z,E)$ is computed.", &
+                          description="Defines whether an integrated LDOS is used for "// &
+                          "calculating "// &
+                          "the local VBM, CBM, gap. As an example, for INTEGRATION Z, the LDOS "// &
+                          "ρ(x,y,E) = int_z ρ(x,y,z,E) is used and the local VBM, local CBM and "// &
+                          "local gap only depend on x and y.", &
                           usage="INTEGRATION Z", &
                           enum_c_vals=s2a("X", "Y", "Z", "NONE"), &
                           enum_i_vals=(/int_ldos_x, int_ldos_y, int_ldos_z, int_ldos_none/), &
@@ -2286,17 +2259,48 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create( &
-         keyword, __LOCATION__, name="BIN_MESH", &
-         description="Mesh of size n x m for binning the space coordinates x and y of "// &
-         "the LDOS $\rho(x,y,E)$. If -1, no binning is performed and the "// &
-         "fine x, y resolution of the electron density from SCF is used.", &
-         usage="BIN_MESH  n m", &
-         n_var=2, type_of_var=integer_t, default_i_vals=(/10, 10/))
+      CALL keyword_create(keyword, __LOCATION__, name="EPS_LDOS", &
+                          description="Determines threshold α, see description of  "// &
+                          "section &LOCAL_VBM_CBM_GAP.", &
+                          usage="EPS_LDOS 1E-1 1E-2 1E-3", default_r_val=1.0E-2_dp, n_var=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-   END SUBROUTINE create_ldos_section
+      CALL keyword_create(keyword, __LOCATION__, name="ENERGY_WINDOW", &
+                          description="Energy_window from description of LOCAL_VBM_CBM_GAP "// &
+                          "section. As the local VBM, CBM, gap are no quantum-mechanical "// &
+                          "observables, their value will depend on ENERGY_WINDOW. "// &
+                          "Larger ENERGY_WINDOW leads to a higher computational cost.", &
+                          usage="ENERGY_WINDOW 2.0 1.5 1.0 0.5 0.3", &
+                          default_r_val=cp_unit_to_cp2k(value=1.0_dp, unit_str="eV"), &
+                          n_var=-1, &
+                          unit_str="eV")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ENERGY_STEP", &
+                          description="Resolution of the energy E when computing the "// &
+                          "LDOS ρ(r,E). The weight α in the Gaussian weight function "// &
+                          "(see description of LOCAL_VBM_CBM_GAP section) is chosen as "// &
+                          "ENERGY_STEP. Convergence is reached with a small ENERGY_STEP; "// &
+                          "computational cost increases for smaller ENERGY_STEP.", &
+                          usage="ENERGY_STEP 0.02", &
+                          default_r_val=cp_unit_to_cp2k(value=0.02_dp, unit_str="eV"), &
+                          unit_str="eV")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create( &
+         keyword, __LOCATION__, name="BIN_MESH", &
+         description="Mesh of size n x m for binning the space coordinates x and y of "// &
+         "the LDOS ρ(x,y,E). If -1, no binning is performed and the "// &
+         "fine x, y resolution of the electron density from SCF is used.", &
+         usage="BIN_MESH  n m", &
+         n_var=2, type_of_var=integer_t, default_i_vals=(/-1, -1/))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_local_vbm_cbm_gap_section
 
 ! **************************************************************************************************
 !> \brief creates an input section for a tip scan calculation

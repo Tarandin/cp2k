@@ -10,7 +10,8 @@ MODULE tip_scan_types
                                               section_vals_val_get
    USE kinds,                           ONLY: default_string_length,&
                                               dp
-   USE pw_types,                        ONLY: pw_type
+   USE pw_types,                        ONLY: pw_release,&
+                                              pw_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -156,11 +157,11 @@ CONTAINS
          DEALLOCATE (scan_info%tip_pos)
       END IF
       IF (ASSOCIATED(scan_info%tip_pw_r)) THEN
-         CALL scan_info%tip_pw_r%release()
+         CALL pw_release(scan_info%tip_pw_r)
          DEALLOCATE (scan_info%tip_pw_r)
       END IF
       IF (ASSOCIATED(scan_info%tip_pw_g)) THEN
-         CALL scan_info%tip_pw_g%release()
+         CALL pw_release(scan_info%tip_pw_g)
          DEALLOCATE (scan_info%tip_pw_g)
       END IF
 

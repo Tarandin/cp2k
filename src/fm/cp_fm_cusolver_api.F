@@ -34,7 +34,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE cp_fm_diag_cusolver(matrix, eigenvectors, eigenvalues)
       TYPE(cp_fm_type), INTENT(IN)                       :: matrix, eigenvectors
-      REAL(KIND=dp), DIMENSION(:), INTENT(OUT)           :: eigenvalues
+      REAL(KIND=dp), DIMENSION(:), INTENT(INOUT)         :: eigenvalues
 
       CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_diag_cusolver'
 

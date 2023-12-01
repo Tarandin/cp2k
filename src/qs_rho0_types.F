@@ -13,7 +13,8 @@ MODULE qs_rho0_types
                                               pi,&
                                               rootpi
    USE memory_utilities,                ONLY: reallocate
-   USE pw_types,                        ONLY: pw_type
+   USE pw_types,                        ONLY: pw_release,&
+                                              pw_type
    USE qs_grid_atom,                    ONLY: grid_atom_type
    USE qs_rho_atom_types,               ONLY: rho_atom_coeff
    USE whittaker,                       ONLY: whittaker_c0a,&
@@ -375,12 +376,12 @@ CONTAINS
          END IF
 
          IF (ASSOCIATED(rho0%rho0_s_rs)) THEN
-            CALL rho0%rho0_s_rs%release()
+            CALL pw_release(rho0%rho0_s_rs)
             DEALLOCATE (rho0%rho0_s_rs)
          END IF
 
          IF (ASSOCIATED(rho0%rho0_s_gs)) THEN
-            CALL rho0%rho0_s_gs%release()
+            CALL pw_release(rho0%rho0_s_gs)
             DEALLOCATE (rho0%rho0_s_gs)
 
          END IF

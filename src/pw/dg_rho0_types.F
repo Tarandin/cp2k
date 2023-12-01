@@ -20,6 +20,8 @@ MODULE dg_rho0_types
                                               do_ewald_spme
    USE pw_types,                        ONLY: REALDATA3D,&
                                               REALSPACE,&
+                                              pw_create,&
+                                              pw_release,&
                                               pw_type
 #include "../base/base_uses.f90"
 
@@ -143,7 +145,7 @@ CONTAINS
             DEALLOCATE (dg_rho0%zet)
          END IF
          IF (ASSOCIATED(dg_rho0%density)) THEN
-            CALL dg_rho0%density%release()
+            CALL pw_release(dg_rho0%density)
             DEALLOCATE (dg_rho0%density)
          END IF
          NULLIFY (dg_rho0%gcc)
@@ -163,16 +165,16 @@ CONTAINS
       TYPE(pw_grid_type), POINTER                        :: pw_grid
 
       IF (ASSOCIATED(dg_rho0%density)) THEN
-         CALL dg_rho0%density%release()
+         CALL pw_release(dg_rho0%density)
       ELSE
          ALLOCATE (dg_rho0%density)
       END IF
       SELECT CASE (dg_rho0%type)
       CASE (do_ewald_ewald)
-         CALL dg_rho0%density%create(pw_grid, REALDATA3D, REALSPACE)
+         CALL pw_create(dg_rho0%density, pw_grid, REALDATA3D, REALSPACE)
          CALL dg_rho0_pme_gauss(dg_rho0%density, dg_rho0%zet(1))
       CASE (do_ewald_pme)
-         CALL dg_rho0%density%create(pw_grid, REALDATA3D, REALSPACE)
+         CALL pw_create(dg_rho0%density, pw_grid, REALDATA3D, REALSPACE)
          CALL dg_rho0_pme_gauss(dg_rho0%density, dg_rho0%zet(1))
       CASE (do_ewald_spme)
          CPABORT('SPME type not implemented')

@@ -21,10 +21,12 @@ MODULE qs_tddfpt2_methods
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
                                               cp_fm_release,&
+                                              cp_fm_write_formatted,&
                                               cp_fm_to_fm,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
+                                              cp_logger_get_default_unit_nr,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_add_iter_level,&
                                               cp_iterate,&
@@ -133,7 +135,7 @@ CONTAINS
 
       INTEGER                                            :: handle, ispin, istate, log_unit, mult, &
                                                             my_state, nao, nocc, nspins, &
-                                                            nstate_max, nstates, nvirt, old_state
+                                                            nstate_max, nstates, nvirt, old_state, ii
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
                                                             do_soc, lmult_tmp, state_change
@@ -226,6 +228,12 @@ CONTAINS
       END IF
 
       IF (ASSOCIATED(matrix_ks_oep)) matrix_ks => matrix_ks_oep
+
+     ! IF (logger%para_env%is_source()) THEN
+     !    log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+     ! ELSE
+     !    log_unit = -1
+     ! END IF
 
       ! components of the dipole operator
       CALL tddfpt_dipole_operator(dipole_op_mos_occ, &

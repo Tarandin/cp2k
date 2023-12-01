@@ -83,7 +83,9 @@ MODULE qs_linres_current
                                               pw_integrate_function,&
                                               pw_scale,&
                                               pw_zero
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: REALDATA3D,&
                                               REALSPACE,&
                                               pw_type
@@ -478,8 +480,8 @@ CONTAINS
          CALL pw_env_get(pw_env, auxbas_rs_desc=auxbas_rs_desc, &
                          auxbas_pw_pool=auxbas_pw_pool)
          !
-         CALL auxbas_pw_pool%create_pw(wf_r, use_data=REALDATA3D, &
-                                       in_space=REALSPACE)
+         CALL pw_pool_create_pw(auxbas_pw_pool, wf_r, use_data=REALDATA3D, &
+                                in_space=REALSPACE)
          !
          DO idir = 1, 3
             CALL pw_zero(wf_r)
@@ -511,7 +513,7 @@ CONTAINS
                  &                            "PRINT%CURRENT_CUBES", mpi_io=mpi_io)
          END DO
          !
-         CALL auxbas_pw_pool%give_back_pw(wf_r)
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_r)
       END IF ! current cube
       !
       ! Integrated current response checksum

@@ -28,7 +28,8 @@ MODULE qmmm_types_low
                                               particle_type
    USE pw_grid_types,                   ONLY: pw_grid_type
    USE pw_grids,                        ONLY: pw_grid_release
-   USE pw_pool_types,                   ONLY: pw_pool_p_type,&
+   USE pw_pool_types,                   ONLY: pw_pool_give_back_pw,&
+                                              pw_pool_p_type,&
                                               pw_pool_release,&
                                               pw_pool_type,&
                                               pw_pools_dealloc
@@ -539,7 +540,7 @@ CONTAINS
                DEALLOCATE (Per_Potentials(I)%Pot%mm_atom_index)
             END IF
             IF (ASSOCIATED(Per_Potentials(I)%Pot%TabLR)) THEN
-               CALL Per_Potentials(I)%Pot%pw_pool%give_back_pw(Per_Potentials(I)%Pot%TabLR)
+               CALL pw_pool_give_back_pw(Per_Potentials(I)%Pot%pw_pool, Per_Potentials(I)%Pot%TabLR)
                DEALLOCATE (Per_Potentials(I)%Pot%TabLR)
             END IF
             IF (ASSOCIATED(Per_Potentials(I)%Pot%pw_pool)) THEN

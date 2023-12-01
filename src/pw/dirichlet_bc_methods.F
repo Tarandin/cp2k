@@ -35,7 +35,9 @@ MODULE dirichlet_bc_methods
    USE pw_methods,                      ONLY: pw_axpy,&
                                               pw_zero
    USE pw_poisson_types,                ONLY: pw_poisson_parameter_type
-   USE pw_pool_types,                   ONLY: pw_pool_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
    USE pw_types,                        ONLY: REALDATA3D,&
                                               REALSPACE,&
                                               pw_type
@@ -319,7 +321,7 @@ CONTAINS
          tile_maxvals = 0.0_dp
          DO k = 1, n_tiles
             ALLOCATE (dirichlet_bc%tiles(k)%tile%tile_pw)
-            CALL pw_pool%create_pw(dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
+            CALL pw_pool_create_pw(pw_pool, dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
             CALL pw_zero(dirichlet_bc%tiles(k)%tile%tile_pw)
 
             IF ((unit_nr .GT. 0) .AND. verbose) THEN
@@ -352,12 +354,12 @@ CONTAINS
 
          NULLIFY (cylinder_pw)
          ALLOCATE (cylinder_pw)
-         CALL pw_pool%create_pw(cylinder_pw, use_data=REALDATA3D, in_space=REALSPACE)
+         CALL pw_pool_create_pw(pw_pool, cylinder_pw, use_data=REALDATA3D, in_space=REALSPACE)
          CALL pw_zero(cylinder_pw)
 
          DO k = 1, n_tiles
             ALLOCATE (dirichlet_bc%tiles(k)%tile%tile_pw)
-            CALL pw_pool%create_pw(dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
+            CALL pw_pool_create_pw(pw_pool, dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
             CALL pw_zero(dirichlet_bc%tiles(k)%tile%tile_pw)
 
             IF ((unit_nr .GT. 0) .AND. verbose) THEN
@@ -385,7 +387,7 @@ CONTAINS
                           "one can increase DELTA_ALPHA (see the reference manual).")
          END IF
 
-         CALL pw_pool%give_back_pw(cylinder_pw)
+         CALL pw_pool_give_back_pw(pw_pool, cylinder_pw)
          DEALLOCATE (cylinder_pw)
 
          IF ((unit_nr .GT. 0) .AND. verbose) WRITE (unit_nr, '(T3,A)') REPEAT('=', 78)
@@ -403,7 +405,7 @@ CONTAINS
 
          DO k = 1, n_tiles
             ALLOCATE (dirichlet_bc%tiles(k)%tile%tile_pw)
-            CALL pw_pool%create_pw(dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
+            CALL pw_pool_create_pw(pw_pool, dirichlet_bc%tiles(k)%tile%tile_pw, use_data=REALDATA3D, in_space=REALSPACE)
             CALL pw_zero(dirichlet_bc%tiles(k)%tile%tile_pw)
 
             IF ((unit_nr .GT. 0) .AND. verbose) THEN
