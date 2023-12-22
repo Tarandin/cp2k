@@ -14,15 +14,13 @@ MODULE qs_tddfpt2_soc
                                               cp_cfm_get_submatrix,&
                                               cp_cfm_release,&
                                               cp_cfm_type,&
-                                              cp_fm_to_cfm,&
-                                              cp_cfm_to_fm
+                                              cp_fm_to_cfm
    USE cp_control_types,                ONLY: dft_control_type,&
                                               qs_control_type,&
                                               tddfpt2_control_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
-                                              cp_dbcsr_sm_fm_multiply,&
-                                              dbcsr_allocate_matrix_set
+                                              cp_dbcsr_sm_fm_multiply
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale,&
                                               cp_fm_transpose,&
                                               cp_fm_upper_to_full
@@ -31,8 +29,7 @@ MODULE qs_tddfpt2_soc
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: &
         cp_fm_create, cp_fm_get_diag, cp_fm_get_info, cp_fm_get_submatrix, cp_fm_release, &
-        cp_fm_set_all, cp_fm_set_element, cp_fm_to_fm_submat, cp_fm_type,&
-        cp_fm_write_formatted
+        cp_fm_set_all, cp_fm_set_element, cp_fm_to_fm_submat, cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
                                               cp_logger_type
@@ -41,7 +38,7 @@ MODULE qs_tddfpt2_soc
         dbcsr_copy, dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, &
         dbcsr_distribution_release, dbcsr_distribution_type, dbcsr_get_info, dbcsr_multiply, &
         dbcsr_p_type, dbcsr_print, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_scale, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_init_p, dbcsr_set
+        dbcsr_type, dbcsr_type_no_symmetry
    USE input_constants,                 ONLY: tddfpt_dipole_length
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
@@ -81,10 +78,10 @@ MODULE qs_tddfpt2_soc
                                               soc_env_create,&
                                               soc_env_release,&
                                               soc_env_type
-   USE qs_tddfpt2_soc_utils,            ONLY: soc_contract_evect,&
-                                              soc_dipole_operator,&
-                                              dip_vel_op,&
-                                              resort_evects
+   USE qs_tddfpt2_soc_utils,            ONLY: dip_vel_op,&
+                                              resort_evects,&
+                                              soc_contract_evect,&
+                                              soc_dipole_operator
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos
    USE soc_pseudopotential_methods,     ONLY: V_SOC_xyz_from_pseudopotential
    USE spherical_harmonics,             ONLY: clebsch_gordon,&
@@ -219,13 +216,13 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'tddfpt_soc_rcs'
 
-      CHARACTER(len=1)                                   :: mult
+      CHARACTER(len=3)                                   :: mult
       INTEGER                                            :: dipole_form, group, handle, iex, ii, &
                                                             isg, istate, itp, jj, nactive, nao, &
                                                             nex, npcols, nprows, nsg, ntot, ntp
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: evects_sort
       INTEGER, DIMENSION(:), POINTER                     :: col_blk_size, col_dist, row_blk_size, &
                                                             row_dist, row_dist_new
-      INTEGER, DIMENSION(:), ALLOCATABLE                 :: evects_sort
       INTEGER, DIMENSION(:, :), POINTER                  :: pgrid
       LOGICAL                                            :: print_ev, print_some, print_splitting, &
                                                             print_wn
@@ -256,8 +253,8 @@ CONTAINS
                                                             tddfpt_print_section
       TYPE(soc_atom_env_type), POINTER                   :: soc_atom_env
       TYPE(soc_env_type), TARGET                         :: soc_env
-      !!DEBUG
-      COMPLEX(dp), DIMENSION(:,:), ALLOCATABLE           :: db
+
+!!DEBUG
 
 !! OUTPUT structures
 
@@ -435,7 +432,6 @@ CONTAINS
       !  Only have SOC between singlet-triplet triplet-triplet and ground_state-triplet, the resulting
       !  matrix is Hermitian i.e. the real part is symmetric and the imaginary part is anti-symmetric.
       !  Can only fill upper half
-!FROM HERE
       IF (log_unit > 0 .AND. debug_this_module) THEN
          WRITE (log_unit, '(A)') "Starting Ground-State contributions..."
       END IF
@@ -874,12 +870,12 @@ CONTAINS
          CALL dbcsr_scale(dbcsr_dummy, wavenumbers)
          CALL dbcsr_print(dbcsr_dummy, unit_nr=log_unit)
       END IF
-!TO HERE
+
       !Intermediate clean-up
       CALL cp_fm_struct_release(work_struct)
       CALL cp_fm_release(work_fm)
       CALL cp_fm_release(tmp_fm)
-     ! DEALLOCATE (diag, mo_soc_x, mo_soc_y, mo_soc_z)
+      ! DEALLOCATE (diag, mo_soc_x, mo_soc_y, mo_soc_z)
 
       IF (log_unit > 0) THEN
          WRITE (log_unit, '(A)') "Diagonlzing SOC-Matrix"
@@ -962,42 +958,27 @@ CONTAINS
       ALLOCATE (tmp_evals(ntot))
       CALL cp_cfm_create(evecs_cfm, full_struct)
       CALL cp_cfm_heevd(hami_cfm, evecs_cfm, tmp_evals)
-      !CALL cp_cfm_to_fm(evecs_cfm, real_fm, img_fm)
-      
 
-      IF (logger%para_env%is_source()) THEN
-         log_unit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
-      ELSE
-         log_unit = -1
-      END IF
+      ! CALL cp_fm_get_submatrix(real_fm, real_tmp, 1, 1, ntot, ntot)
+      ! IF (log_unit > 0) THEN
+      !    WRITE(log_unit,'(A)') "TEST sorted evec"
+      !    DO jj = 1,ntot
+      !            WRITE(log_unit,'(I3,A,I3)') jj , "------->", evects_sort(jj)
+      !            tmp = 0
+      !            DO ii = 1, ntot
+      !              WRITE(log_unit, '(A,F5.3)') "NEW", REAL(db(ii,jj))
+      !              WRITE(log_unit, '(A,F5.3)') "OLD", real_tmp(ii,evects_sort(jj))
+      !              tmp = tmp + REAL(db(ii,jj))
+      !              tmp = tmp - real_tmp(ii,evects_sort(jj))
+      !            END DO
+      !            WRITE(log_unit,'(A,F13.8)') "Error:  ", tmp
+      !    END DO
+      ! END IF
+      ! DEALLOCATE(real_tmp)
+      ! DEALLOCATE(db)
+      ! CALL cp_fm_release(real_fm)
+      ! CALL cp_fm_release(img_fm)
 
-     ! IF (log_unit > 0) WRITE(log_unit,'(A)') "START resorting"
-     ! CALL resort_evects(evecs_cfm, evects_sort,db)
-     ! IF (log_unit > 0) WRITE(log_unit,'(A)') "END resorting"
-
-     ! ALLOCATE (real_tmp(ntot, ntot))
-     ! real_tmp = 0_dp
-
-     ! CALL cp_fm_get_submatrix(real_fm, real_tmp, 1, 1, ntot, ntot)
-     ! IF (log_unit > 0) THEN
-     !    WRITE(log_unit,'(A)') "TEST sorted evec"
-     !    DO jj = 1,ntot
-     !            WRITE(log_unit,'(I3,A,I3)') jj , "------->", evects_sort(jj)
-     !            tmp = 0
-     !            DO ii = 1, ntot
-     !              WRITE(log_unit, '(A,F5.3)') "NEW", REAL(db(ii,jj))
-     !              WRITE(log_unit, '(A,F5.3)') "OLD", real_tmp(ii,evects_sort(jj))
-     !              tmp = tmp + REAL(db(ii,jj))
-     !              tmp = tmp - real_tmp(ii,evects_sort(jj))
-     !            END DO
-     !            WRITE(log_unit,'(A,F13.8)') "Error:  ", tmp
-     !    END DO
-     ! END IF
-     ! DEALLOCATE(real_tmp)
-     ! DEALLOCATE(db)
-     ! CALL cp_fm_release(real_fm)
-     ! CALL cp_fm_release(img_fm)
-      
       !  Adjust the energies so the GS has zero, and store in the donor_state (without the GS)
       ALLOCATE (soc_env%soc_evals(ntot - 1))
       soc_env%soc_evals(:) = tmp_evals(2:ntot) - tmp_evals(1)
@@ -1020,7 +1001,7 @@ CONTAINS
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env, &
-                     evecs_cfm, eps_filter, dipole_form, gs_mos,&
+                     evecs_cfm, eps_filter, dipole_form, gs_mos, &
                      evects_sing, evects_trip, log_unit)
 
       !Create final output
@@ -1044,8 +1025,8 @@ CONTAINS
          END IF
          WRITE (log_unit, '(A)') "------------------------------------------------------------------------------"
          DO istate = 1, SIZE(soc_env%soc_evals)
-            WRITE (log_unit, '(6X,I3,11X,2F16.5)') istate, soc_env%soc_evals(istate)*unit_scale,&
-            soc_env%soc_osc(istate)
+            WRITE (log_unit, '(6X,I5,11X,2F16.5)') istate, soc_env%soc_evals(istate)*unit_scale, &
+               soc_env%soc_osc(istate)
          END DO
          !! This is used for regtesting
          WRITE (log_unit, '(A,F18.8)') "TDDFT+SOC : CheckSum (eV) ", SUM(soc_env%soc_evals)*evolt
@@ -1054,56 +1035,52 @@ CONTAINS
       !! We may be interested in the differenz between the SOC and
       !! TDDFPT Eigenvalues
       !! Activated with the "SPLITTING" keyword in "SOC_PRINT" section
-      IF (log_unit > 0 .AND. (print_splitting .OR. debug_this_module)) THEN
-         isg = 1
-         itp = 1
-         iex = 1
-         tmp = 0.0
-         mult = ""
-         WRITE (log_unit, '(A)') "------------------------------------------------------------------------"
-         WRITE (log_unit, '(A)') "-                            Splittings                                -"
-         WRITE (log_unit, '(A)') "------------------------------------------------------------------------"
-         IF (print_ev) THEN
-            WRITE (log_unit, '(A)') "-  STATE   MULT     exc.energies[eV]    splittings[eV]                 -"
-         ELSE IF (print_wn) THEN
-            WRITE (log_unit, '(A)') "-  STATE   MULT     exc.energies[cm-1]  splittings[cm-1]               -"
-         ELSE
-            WRITE (log_unit, '(A)') "-  STATE   MULT     exc.energies[Hartree]  splittings[Hartree]         -"
-         END IF
-         WRITE (log_unit, '(A)') "------------------------------------------------------------------------"
-         DO WHILE (iex <= SIZE(soc_env%soc_evals))
-            IF (itp < SIZE(evals_trip) .AND. isg < SIZE(evals_sing)) THEN
-               IF (evals_sing(isg) < evals_trip(itp)) THEN
-                  tmp = soc_env%soc_evals(iex) - evals_sing(isg)
-                  mult = "S"
-                  isg = isg + 1
-               ELSE
-                  tmp = soc_env%soc_evals(iex) - evals_trip(itp)
-                  mult = "T"
-                  itp = itp + 1
-               END IF
-            ELSE IF (itp > SIZE(evals_trip)) THEN
-               tmp = soc_env%soc_evals(iex) - evals_sing(isg)
-               mult = "S"
-               isg = isg + 1
+      IF (print_splitting .OR. debug_this_module) THEN
+         CALL resort_evects(evecs_cfm, evects_sort)
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, '(A)') "-----------------------------------------------------------------------------"
+            WRITE (log_unit, '(A)') "-                              Splittings                                   -"
+            WRITE (log_unit, '(A)') "-----------------------------------------------------------------------------"
+            IF (print_ev) THEN
+               WRITE (log_unit, '(A)') "-     STATE          exc.energies[eV]          splittings[eV]               -"
+            ELSE IF (print_wn) THEN
+               WRITE (log_unit, '(A)') "-     STATE          exc.energies[cm-1]        splittings[cm-1]             -"
             ELSE
-               tmp = soc_env%soc_evals(iex) - evals_trip(itp)
-               mult = "T"
-               itp = itp + 1
+               WRITE (log_unit, '(A)') "-     STATE          exc.energies[Hartree]     splittings[Hartree]          -"
             END IF
-            WRITE (log_unit, '(3X,I5,7X,A,7X,F16.8,7X,F16.8)') iex, mult, &
-               soc_env%soc_evals(iex)*unit_scale, tmp*unit_scale
-            iex = iex + 1
-            IF (mult == "T") THEN
-               DO ii = 1, 2
-                  tmp = soc_env%soc_evals(iex) - evals_trip(itp - 1)
-                  WRITE (log_unit, '(3X,I5,7X,A,7X,F16.8,7X,F16.8)') iex, mult, &
-                     soc_env%soc_evals(iex)*unit_scale, tmp*unit_scale
-                  iex = iex + 1
-               END DO
-            END IF
-         END DO
-         WRITE (log_unit, '(A)') "------------------------------------------------------------------------"
+            WRITE (log_unit, '(A)') "-----------------------------------------------------------------------------"
+            mult = "   "
+            DO iex = 1, SIZE(soc_env%soc_evals)
+               IF (evects_sort(iex + 1) .GT. nsg + ntp*2 + 1) THEN
+                  mult = "T+1"
+               ELSE IF (evects_sort(iex + 1) .GT. nsg + ntp + 1) THEN
+                  mult = "T0"
+               ELSE IF (evects_sort(iex + 1) .GT. nsg + 1) THEN
+                  mult = "T-1"
+               ELSE
+                  mult = "S  "
+               END IF
+               IF (mult == "T-1") THEN
+                  WRITE (log_unit, "(5X,A,I5,6X,F18.10,6X,F18.10)") mult, &
+                     evects_sort(iex + 1) - (1 + nsg), soc_env%soc_evals(iex)*unit_scale, &
+                     (soc_env%soc_evals(iex) - evals_trip(evects_sort(iex + 1) - (1 + nsg)))*unit_scale
+               ELSE IF (mult == "T0") THEN
+                  WRITE (log_unit, "(5X,A,I5,6X,F18.10,6X,F18.10)") mult, &
+                     evects_sort(iex + 1) - (1 + nsg + ntp), soc_env%soc_evals(iex)*unit_scale, &
+                     (soc_env%soc_evals(iex) - evals_trip(evects_sort(iex + 1) - (1 + nsg + ntp)))*unit_scale
+               ELSE IF (mult == "T+1") THEN
+                  WRITE (log_unit, "(5X,A,I5,6X,F18.10,6X,F18.10)") mult, &
+                     evects_sort(iex + 1) - (1 + nsg + ntp*2), soc_env%soc_evals(iex)*unit_scale, &
+                     (soc_env%soc_evals(iex) - evals_trip(evects_sort(iex + 1) - (1 + nsg + ntp*2)))*unit_scale
+               ELSE IF (mult == "S  ") THEN
+                  WRITE (log_unit, "(5X,A,I5,6X,F18.10,6X,F18.10)") mult, &
+                     evects_sort(iex + 1), soc_env%soc_evals(iex)*unit_scale, &
+                     (soc_env%soc_evals(iex) - evals_sing(evects_sort(iex + 1) - 1))*unit_scale
+               END IF
+            END DO
+            WRITE (log_unit, '(A)') "----------------------------------------------------------------------------"
+            DEALLOCATE (evects_sort)
+         END IF
       END IF
 
       !! clean up
@@ -1123,6 +1100,7 @@ CONTAINS
          CALL dbcsr_release(dbcsr_dummy)
          DEALLOCATE (dbcsr_dummy)
       END IF
+
       DEALLOCATE (dbcsr_work, dbcsr_prod, dbcsr_ovlp, dbcsr_tmp)
       DEALLOCATE (coeffs_dist, prod_dist, col_dist, col_blk_size, row_dist_new)
       DEALLOCATE (dbcsr_sg, dbcsr_tp, tmp_evals)
@@ -1139,16 +1117,21 @@ CONTAINS
 !> \param evects_a singlet Eigenvectors
 !> \param evects_b triplet eigenvectors
 !> \param dipole_form choosen dipole-form from TDDFPT-Section
+!> \param gs_mos ...
+!> \param log_unit ...
 ! **************************************************************************************************
    SUBROUTINE inititialize_soc(qs_env, soc_atom_env, soc_env, &
                                evects_a, evects_b, &
-                               dipole_form, gs_mos,log_unit)
+                               dipole_form, gs_mos, log_unit)
       !! Different Types
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(soc_atom_env_type), INTENT(OUT), POINTER      :: soc_atom_env
       TYPE(soc_env_type), INTENT(OUT), TARGET            :: soc_env
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_a, evects_b
       INTEGER                                            :: dipole_form
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         INTENT(in)                                      :: gs_mos
+      INTEGER                                            :: log_unit
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'inititialize_soc'
 
@@ -1156,10 +1139,9 @@ CONTAINS
          ALLOCATABLE, DIMENSION(:, :)                    :: grid_info
       CHARACTER(len=default_string_length), &
          DIMENSION(:), POINTER                           :: k_list
-      INTEGER, DIMENSION(2)                              :: nmo_occ, nmo_virt
       INTEGER                                            :: handle, i, ikind, irep, ispin, nactive, &
                                                             nao, natom, nkind, nrep, nspins, &
-                                                            nstates, ideriv
+                                                            nstates
       LOGICAL                                            :: all_potential_present, do_os
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
@@ -1172,18 +1154,8 @@ CONTAINS
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: soc_section
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
-      !!DEBUG
-      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
-         INTENT(in)                                      :: gs_mos
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: S_mos_virt
-      TYPE(cp_fm_type)                                   :: dipmat_tmp, wfm_ao_ao
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ
-      TYPE(cp_fm_struct_type), POINTER                   :: dip_struct
-      INTEGER                                            :: log_unit, group, npcols, nprows, nex, iex
-      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist, coeffs_dist
-      INTEGER, DIMENSION(:), POINTER                     :: col_blk_size, col_dist, row_blk_size, &
-                                                            row_dist, row_dist_new
-      INTEGER, DIMENSION(:, :), POINTER                  :: pgrid
+
+!!DEBUG
 
       CALL timeset(routineN, handle)
 
@@ -1230,9 +1202,9 @@ CONTAINS
       !! All excited states shall be written in one matrix, oneafter the other
       nstates = SIZE(evects_a, 2)
       !nspins = SIZE(evects_a, 1)
-     ! DO ispin = 1, nspins
-     !    CALL cp_fm_get_info(evects_a(ispin, 1), nrow_global=nao, ncol_global=nactive)
-     ! END DO
+      ! DO ispin = 1, nspins
+      !    CALL cp_fm_get_info(evects_a(ispin, 1), nrow_global=nao, ncol_global=nactive)
+      ! END DO
 
       a_coeff => soc_env%a_coeff
       b_coeff => soc_env%b_coeff
@@ -1474,19 +1446,23 @@ CONTAINS
 !> \param eps_filter ...
 !> \param dipole_form ...
 !> \param gs_mos ...
+!> \param evects_sing ...
+!> \param evects_trip ...
+!> \param log_unit ...
 ! **************************************************************************************************
    SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env, &
-                        soc_evecs_cfm, eps_filter, dipole_form, gs_mos,&
-                        evects_sing,evects_trip, log_unit)
+                        soc_evecs_cfm, eps_filter, dipole_form, gs_mos, &
+                        evects_sing, evects_trip, log_unit)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_soc_package_type)                       :: dbcsr_soc_package
       TYPE(soc_env_type), TARGET                         :: soc_env
       TYPE(cp_cfm_type), INTENT(in)                      :: soc_evecs_cfm
       REAL(dp), INTENT(IN)                               :: eps_filter
-      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_sing, evects_trip
       INTEGER                                            :: dipole_form
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_sing, evects_trip
+      INTEGER                                            :: log_unit
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'soc_dipol'
 
@@ -1498,8 +1474,8 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: dip_struct, full_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: amew_dip
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      !!DEBUG
-      INTEGER                                            :: log_unit
+
+!!DEBUG
 
       CALL timeset(routineN, handle)
 
@@ -1528,8 +1504,8 @@ CONTAINS
       ALLOCATE (transdip(ntot, 1))
 
       CALL get_rcs_amew_op(amew_dip, soc_env, dbcsr_soc_package, &
-                           eps_filter, qs_env, gs_mos,&
-                          evects_sing, evects_trip, log_unit)
+                           eps_filter, qs_env, gs_mos, &
+                           evects_sing, evects_trip, log_unit)
 
       DO i = 1, 3 !cartesian coord x, y, z
 
@@ -1588,8 +1564,11 @@ CONTAINS
 !> \param eps_filter ...
 !> \param qs_env ...
 !> \param gs_mos ...
+!> \param evects_sing ...
+!> \param evects_trip ...
+!> \param log_unit ...
 ! **************************************************************************************************
-   SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env, gs_mos,&
+   SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env, gs_mos, &
                               evects_sing, evects_trip, log_unit)
 
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:), &
@@ -1597,15 +1576,17 @@ CONTAINS
       TYPE(soc_env_type), TARGET                         :: soc_env
       TYPE(dbcsr_soc_package_type)                       :: dbcsr_soc_package
       REAL(dp), INTENT(IN)                               :: eps_filter
-      TYPE(qs_environment_type) , POINTER                :: qs_env
+      TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_sing, evects_trip
+      INTEGER                                            :: log_unit
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'get_rcs_amew_op'
 
       INTEGER                                            :: dim_op, handle, i, isg, nactive, nao, &
                                                             nex, nsg, ntot, ntp
+      LOGICAL                                            :: vel_rep
       REAL(dp)                                           :: op, sqrt2
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: diag, gs_diag, gsgs_op
       REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: mo_op, sggs_block
@@ -1614,16 +1595,14 @@ CONTAINS
                                                             std_struct, tmp_struct
       TYPE(cp_fm_type)                                   :: gs_fm, sggs_fm, tmp_fm, vec_op, work_fm
       TYPE(cp_fm_type), POINTER                          :: gs_coeffs
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER            :: ao_op
-      TYPE(dbcsr_type), POINTER                          :: ao_op_i,dbcsr_ovlp, dbcsr_prod, &
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ao_op, matrix_s
+      TYPE(dbcsr_type), POINTER                          :: ao_op_i, dbcsr_ovlp, dbcsr_prod, &
                                                             dbcsr_sg, dbcsr_tmp, dbcsr_tp, &
                                                             dbcsr_work
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      LOGICAL                                            :: vel_rep
-      !!DEBUG
-      INTEGER                                            :: log_unit
+
+!!DEBUG
 
       CALL timeset(routineN, handle)
 
@@ -1637,11 +1616,11 @@ CONTAINS
       ! Initialization
       !! Fist case for length, secound for velocity-representation
       IF (ASSOCIATED(soc_env%dipmat)) THEN
-          ao_op => soc_env%dipmat
-          vel_rep = .FALSE.
+         ao_op => soc_env%dipmat
+         vel_rep = .FALSE.
       ELSE
-          ao_op => soc_env%dipmat_ao
-          vel_rep = .TRUE.
+         ao_op => soc_env%dipmat_ao
+         vel_rep = .TRUE.
       END IF
       nsg = SIZE(soc_env%evals_a)
       ntp = nsg; nex = nsg !all the same by construction, keep them separate for clarity
@@ -1723,18 +1702,18 @@ CONTAINS
 
          ! The GS-GS contribution
          CALL cp_fm_set_element(amew_op(i), 1, 1, gsgs_op(i))
-        
+
          ! Compute the operator in the MO basis
          CALL cp_dbcsr_sm_fm_multiply(ao_op_i, gs_coeffs, vec_op, ncol=nactive)
          CALL cp_fm_get_submatrix(gs_fm, mo_op)  ! instead of prod_fm
 
          ! Compute the ground-state/singlet components. ao_op*gs_coeffs already stored in vec_op
          IF (vel_rep) THEN
-                 CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE.,&
-                         gs_coeffs, sggs_fm, log_unit)
+            CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE., &
+                            gs_coeffs, sggs_fm, log_unit)
          ELSE
-                 CALL parallel_gemm('T', 'N', nactive*nsg, nactive, nao, &
-                                    1.0_dp, soc_env%a_coeff, vec_op, 0.0_dp, sggs_fm)
+            CALL parallel_gemm('T', 'N', nactive*nsg, nactive, nao, &
+                               1.0_dp, soc_env%a_coeff, vec_op, 0.0_dp, sggs_fm)
          END IF
 
          DO isg = 1, nsg
@@ -1761,17 +1740,17 @@ CONTAINS
                              filter_eps=eps_filter)
 
          IF (vel_rep) THEN
-                 CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE.)
+            CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE.)
          ELSE
-                 !then the operator in the LR orbital basis
-                 CALL dbcsr_multiply('N', 'N', 1.0_dp, &
-                                     ao_op_i, dbcsr_sg, &
-                                     0.0_dp, dbcsr_work, &
-                                     filter_eps=eps_filter)
-                 CALL dbcsr_multiply('T', 'N', 1.0_dp, &
-                                     dbcsr_sg, dbcsr_work, &
-                                     0.0_dp, dbcsr_prod, &
-                                     filter_eps=eps_filter)
+            !then the operator in the LR orbital basis
+            CALL dbcsr_multiply('N', 'N', 1.0_dp, &
+                                ao_op_i, dbcsr_sg, &
+                                0.0_dp, dbcsr_work, &
+                                filter_eps=eps_filter)
+            CALL dbcsr_multiply('T', 'N', 1.0_dp, &
+                                dbcsr_sg, dbcsr_work, &
+                                0.0_dp, dbcsr_prod, &
+                                filter_eps=eps_filter)
          END IF
 
          !use the soc routine, it is compatible
@@ -1808,16 +1787,16 @@ CONTAINS
 
          !the operator in the LR orbital basis
          IF (vel_rep) THEN
-                 CALL dip_vel_op(soc_env, qs_env, evects_trip, dbcsr_prod, i, .TRUE.)
+            CALL dip_vel_op(soc_env, qs_env, evects_trip, dbcsr_prod, i, .TRUE.)
          ELSE
-                 CALL dbcsr_multiply('N', 'N', 1.0_dp, &
-                                     ao_op_i, dbcsr_tp, &
-                                     0.0_dp, dbcsr_work, &
-                                     filter_eps=eps_filter)
-                 CALL dbcsr_multiply('T', 'N', 1.0_dp, &
-                                     dbcsr_tp, dbcsr_work, &
-                                     0.0_dp, dbcsr_prod, &
-                                     filter_eps=eps_filter)
+            CALL dbcsr_multiply('N', 'N', 1.0_dp, &
+                                ao_op_i, dbcsr_tp, &
+                                0.0_dp, dbcsr_work, &
+                                filter_eps=eps_filter)
+            CALL dbcsr_multiply('T', 'N', 1.0_dp, &
+                                dbcsr_tp, dbcsr_work, &
+                                0.0_dp, dbcsr_prod, &
+                                filter_eps=eps_filter)
          END IF
 
          CALL rcs_amew_soc_elements(dbcsr_tmp, &
