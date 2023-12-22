@@ -23,12 +23,17 @@ MODULE qs_tddfpt2_soc_utils
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               cp_dbcsr_sm_fm_multiply,&
-                                              dbcsr_allocate_matrix_set
+                                              dbcsr_allocate_matrix_set,&
+                                              dbcsr_deallocate_matrix_set
+   USE cp_fm_basic_linalg,              ONLY: cp_fm_schur_product
    USE cp_fm_types,                     ONLY: cp_fm_get_info,&
                                               cp_fm_set_all,&
                                               cp_fm_to_fm_submat,&
                                               cp_fm_create,&
                                               cp_fm_release,&
+                                              cp_fm_write_info,&
+                                              cp_fm_write_formatted,&
+                                              cp_fm_to_fm,&
                                               cp_fm_type
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
@@ -39,6 +44,7 @@ MODULE qs_tddfpt2_soc_utils
                                               dbcsr_create,&
                                               dbcsr_release,&
                                               dbcsr_desymmetrize,&
+                                              dbcsr_print,&
                                               dbcsr_type
    USE input_constants,                 ONLY: tddfpt_dipole_berry,&
                                               tddfpt_dipole_length,&
@@ -49,10 +55,17 @@ MODULE qs_tddfpt2_soc_utils
    USE parallel_gemm_api,               ONLY: parallel_gemm
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
+   USE qs_ks_types,                     ONLY: qs_ks_env_type
+   USE qs_neighbor_list_types,          ONLY: neighbor_list_set_p_type
    USE qs_operators_ao,                 ONLY: p_xyz_ao,&
                                               rRc_xyz_ao
+   USE qs_overlap,                      ONLY: build_overlap_matrix
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos
    USE qs_tddfpt2_soc_types,            ONLY: soc_env_type
+   !!DEBUG
+USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_unit_nr,&
+                                              cp_logger_type
 
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num
 #include "./base/base_uses.f90"
@@ -62,7 +75,7 @@ MODULE qs_tddfpt2_soc_utils
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt2_soc_utils'
 
-   PUBLIC :: soc_dipole_operator, soc_contract_evect, resort_evects
+   PUBLIC :: soc_dipole_operator, soc_contract_evect, resort_evects, dip_vel_op
 
    !A helper type for SOC
    TYPE dbcsr_soc_package_type
@@ -86,7 +99,6 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE soc_dipole_operator(soc_env, tddfpt_control, qs_env, gs_mos)
       TYPE(soc_env_type), TARGET                         :: soc_env
-      !TYPE(dbcsr_p_type), DIMENSION(:),POINTER           :: dipmat
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
@@ -109,7 +121,6 @@ CONTAINS
       nspin = 1
            !! Number of dimensions should be 3, unless multipole is implemented in the future
       dim_op = 3
-      !dipmat => soc_env%dipmat_ao
 
            !! Initzilize the dipmat structure
       CALL get_qs_env(qs_env, matrix_s=matrix_s)
@@ -122,7 +133,6 @@ CONTAINS
          CALL dbcsr_copy(soc_env%dipmat_ao(i_dim)%matrix, &
                          matrix_s(1)%matrix, &
                          name="dipole operator matrix")
-         !CALL dbcsr_set(dipmat(i_dim)%matrix, 0.0_dp) !!This line needs to go for qs_tddfpt_properties like ao_op
       END DO
 
       SELECT CASE (tddfpt_control%dipole_form)
@@ -139,9 +149,10 @@ CONTAINS
          !! This will lead to S C^virt C^virt,T Q_q (vgl Strand et al., J. Chem Phys. 150, 044702, 2019)
          CALL length_rep(qs_env, gs_mos, soc_env)
       CASE (tddfpt_dipole_velocity)
-                  !!This Routine calcluates the dipole OPerator within the velocity-form within the ao basis
-                  !!This Operation is only used in xas_tdp and qs_tddfpt_soc, lines uses rmc_x_p_xyz_ao
+         !!This Routine calcluates the dipole OPerator within the velocity-form within the ao basis
+         !!This Operation is only used in xas_tdp and qs_tddfpt_soc, lines uses rmc_x_p_xyz_ao
          CALL p_xyz_ao(soc_env%dipmat_ao, qs_env, minimum_image=.FALSE.)
+         CALL velocity_rep(qs_env, gs_mos, soc_env)
       CASE DEFAULT
          CPABORT("Unimplemented form of the dipole operator")
       END SELECT
@@ -164,21 +175,19 @@ CONTAINS
       TYPE(dbcsr_type), POINTER                          :: symm_tmp
       TYPE(mp_para_env_type), POINTER                    :: para_env
       INTEGER                                            :: nao, nderivs, ideriv, ispin, nspins
-      INTEGER,DIMENSION(:), ALLOCATABLE                  :: nmo_occ, nmo_virt
-
-      NULLIFY(matrix_s, para_env, blacs_env)
+      INTEGER,DIMENSION(:), ALLOCATABLE                  :: nmo_virt
 
       CALL get_qs_env(qs_env,matrix_s=matrix_s, blacs_env=blacs_env, para_env=para_env)
 
       nderivs = 3
       nspins = 1  !!We only account for rcs, will be changed in the future
       CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=nao)
-      ALLOCATE (S_mos_virt(nspins),dipole_op_mos_occ(3, nspins), nmo_occ(nspins),&
+      ALLOCATE (S_mos_virt(nspins),dipole_op_mos_occ(3, nspins),&
                 wfm_ao_ao, nmo_virt(nspins), symm_tmp, dipmat_tmp)
 
       CALL cp_fm_struct_create(dip_struct, context=blacs_env,  ncol_global=nao, nrow_global=nao, para_env=para_env)
       
-      CALL dbcsr_allocate_matrix_set(soc_env%dipmat, 3)
+      CALL dbcsr_allocate_matrix_set(soc_env%dipmat, nderivs)
       CALL dbcsr_desymmetrize(matrix_s(1)%matrix, symm_tmp)
       DO ideriv=1,nderivs
          ALLOCATE(soc_env%dipmat(ideriv)%matrix)
@@ -225,36 +234,206 @@ CONTAINS
         DO ideriv = 1, nderivs
                 CALL cp_fm_release(dipole_op_mos_occ(ideriv, ispin))
         END DO
-      END DOveloclity_rep
+      END DO
       DEALLOCATE(S_mos_virt, dipole_op_mos_occ, nmo_virt, dipmat_tmp)
 
 
    END SUBROUTINE length_rep
 
-   SUBROUTINE veloclity_rep(qs_env, gs_mos, soc_env)
+   SUBROUTINE velocity_rep(qs_env, gs_mos, soc_env)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       TYPE(soc_env_type), TARGET                         :: soc_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: scrm
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_type)                                   :: wfm_ao_ao,& 
+                                                            wfm_mo_virt_mo_occ, scrm_fm
+      TYPE(cp_fm_struct_type), POINTER                   :: scrm_struct, fm_struct, ao_cvirt_struct,& 
+                                                            ao_nocc_struct, cvirt_ao_struct
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: scrm, matrix_s
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_orb
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      INTEGER                                            :: ispin, nspins, ideriv, nderivs
+      INTEGER                                            :: ispin, nspins, ideriv, nderivs, nrow_local,&
+                                                            ncols_local, icol, irow, nao, n_virt, n_occ,&
+                                                            nrows_local
+      INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
+      REAL(kind=dp), CONTIGUOUS, DIMENSION(:, :), &
+         POINTER                                         :: local_data_ediff, local_data_wfm
+      REAL(kind=dp)                                      :: eval_occ
 
+      NULLIFY (scrm,scrm_struct, blacs_env, matrix_s, ao_cvirt_struct, ao_nocc_struct, cvirt_ao_struct)
       nspins = 1
       nderivs = 3
+      ALLOCATE (soc_env%SC(nspins), soc_env%CdS(nspins,nderivs), soc_env%ediff(nspins))
 
-      CALL get_qs_env(qs_env, ks_env=ks_env, sab_orb=sab_orb)
-      NULLIFY (scrm)
+      CALL get_qs_env(qs_env, ks_env=ks_env, sab_orb=sab_orb, blacs_env=blacs_env, matrix_s=matrix_s)
+      CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=nao)
+      CALL cp_fm_struct_create(scrm_struct, nrow_global=nao, ncol_global=nao,&
+                               context=blacs_env)
+      CALL cp_fm_get_info(gs_mos(1)%mos_virt, matrix_struct=ao_cvirt_struct)
+      CALL cp_fm_get_info(gs_mos(1)%mos_occ, matrix_struct=ao_nocc_struct)
+
       CALL build_overlap_matrix(ks_env, matrix_s=scrm, nderivative=1, &
                                    basis_type_a="ORB", basis_type_b="ORB", &
                                    sab_nl=sab_orb)
 
       DO ispin= 1,nspins
-      END DO
+        NULLIFY(fm_struct)
+        n_occ=SIZE(gs_mos(ispin)%evals_occ) 
+        n_virt=SIZE(gs_mos(ispin)%evals_virt)
+        CALL cp_fm_struct_create(fm_struct, nrow_global=n_virt, &
+                   ncol_global=n_occ, context=blacs_env)
+        CALL cp_fm_struct_create(cvirt_ao_struct, nrow_global=n_virt,&
+                ncol_global=nao, context=blacs_env)
+        CALL cp_fm_create(soc_env%ediff(ispin), fm_struct)
+        CALL cp_fm_create(wfm_mo_virt_mo_occ, fm_struct)
+        CALL cp_fm_create(soc_env%SC(ispin), ao_cvirt_struct)
 
-   END SUBROUTINE veloclity_rep
+        CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, &
+                                   gs_mos(ispin)%mos_virt, &
+                                   soc_env%SC(ispin), &
+                                   ncol=n_virt, alpha=1.0_dp, beta=0.0_dp)
+
+        CALL cp_fm_get_info(soc_env%ediff(ispin), nrow_local=nrows_local, ncol_local=ncols_local, &
+                   row_indices=row_indices, col_indices=col_indices, local_data=local_data_ediff)
+        CALL cp_fm_get_info(wfm_mo_virt_mo_occ, local_data=local_data_wfm)
+
+!$OMP       PARALLEL DO DEFAULT(NONE), &
+!$OMP                PRIVATE(eval_occ, icol, irow), &
+!$OMP                SHARED(col_indices, gs_mos, ispin, local_data_ediff, ncols_local, nrows_local, row_indices)
+            DO icol = 1, ncols_local
+               ! E_occ_i ; imo_occ = col_indices(icol)
+               eval_occ = gs_mos(ispin)%evals_occ(col_indices(icol))
+
+               DO irow = 1, nrows_local
+                  ! ediff_inv_weights(a, i) = 1.0 / (E_virt_a - E_occ_i)
+                  ! imo_virt = row_indices(irow)
+                  local_data_ediff(irow, icol) = 1.0_dp/(gs_mos(ispin)%evals_virt(row_indices(irow)) - eval_occ)
+               END DO
+            END DO
+!$OMP       END PARALLEL DO
+
+        DO ideriv = 1, nderivs
+              CALL cp_fm_create(soc_env%CdS(ispin,ideriv), cvirt_ao_struct)
+              CALL cp_fm_create(scrm_fm,scrm_struct)
+              CALL copy_dbcsr_to_fm(scrm(ideriv+1)%matrix,scrm_fm)
+              CALL parallel_gemm('T','N', n_virt, nao, nao, 1.0_dp, gs_mos(ispin)%mos_virt,&
+                      scrm_fm, 0.0_dp, soc_env%CdS(ispin,ideriv))
+              CALL cp_fm_release(scrm_fm)
+             !CALL cp_dbcsr_sm_fm_multiply(scrm(ideriv+1)%matrix, gs_mos(ispin)%mos_virt, soc_env%CdS(ispin,ideriv), ncol=n_virt,&
+             !fmxdb=.TRUE., T_dbcsr="T", T_fm="N", log_unit=log_unit)
+
+        END DO
+
+        CALL cp_fm_release(wfm_mo_virt_mo_occ)
+        CALL cp_fm_struct_release(fm_struct)
+      END DO
+      CALL dbcsr_deallocate_matrix_set(scrm)
+      CALL cp_fm_struct_release(scrm_struct)
+
+   END SUBROUTINE velocity_rep
+
+   SUBROUTINE dip_vel_op(soc_env, qs_env, evec_fm, op, ideriv, tp, gs_coeffs, sggs_fm, log_unit)
+      TYPE(soc_env_type), TARGET                         :: soc_env
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evec_fm
+      TYPE(dbcsr_type), INTENT(INOUT)                    :: op
+      INTEGER, INTENT(IN)                                :: ideriv
+      LOGICAL, INTENT(IN)                                :: tp
+      TYPE(cp_fm_type), POINTER, OPTIONAL                :: gs_coeffs
+      TYPE(cp_fm_type), INTENT(INOUT), OPTIONAL          :: sggs_fm
+      
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_struct_type), POINTER                   :: virt_occ_struct, op_struct
+      TYPE(cp_fm_type), DIMENSION(:, :), ALLOCATABLE     :: WCdSC_tmp
+      TYPE(cp_fm_type)                                   :: CdSC, op_fm, WCdSC, SCWCdSC
+      INTEGER                                            :: n_virt, n_occ, nao,ispin, nex, iex
+      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_fm_type), POINTER                          :: coeff
+      LOGICAL                                            :: sggs
+      !!DEBUG
+      INTEGER, INTENT(IN), OPTIONAL                      :: log_unit
+
+      NULLIFY(virt_occ_struct, virt_occ_struct, op_struct, blacs_env, para_env, coeff)
+
+      IF (tp) THEN
+              coeff => soc_env%b_coeff
+      ELSE
+              coeff => soc_env%a_coeff
+      END IF
+
+      sggs = .FALSE.
+      IF (PRESENT(gs_coeffs)) sggs = .TRUE.
+
+      ispin = 1 !! only rcs availble
+      nex = SIZE(evec_fm,2)
+      IF (.NOT. sggs) ALLOCATE(WCdSC_tmp(ispin,nex))
+      CALL get_qs_env(qs_env, blacs_env=blacs_env, para_env=para_env)
+      CALL cp_fm_get_info(soc_env%CdS(ispin,ideriv), ncol_global=nao, nrow_global=n_virt)
+      CALL cp_fm_get_info(evec_fm(1,1), ncol_global=n_occ)
+
+
+      IF (sggs) THEN
+              CALL cp_fm_struct_create(virt_occ_struct, context=blacs_env, para_env=para_env, nrow_global=n_virt,&
+                               ncol_global=n_occ)
+              CALL cp_fm_struct_create(op_struct, context=blacs_env, para_env=para_env, nrow_global=n_occ*nex,&
+                                        ncol_global=n_occ)
+      ELSE
+              CALL cp_fm_struct_create(virt_occ_struct, context=blacs_env, para_env=para_env, nrow_global=n_virt,&
+                                       ncol_global=n_occ*nex)
+              CALL cp_fm_struct_create(op_struct, context=blacs_env, para_env=para_env, nrow_global=n_occ*nex,&
+                                        ncol_global=n_occ*nex)
+      END IF
+
+      CALL cp_fm_create(CdSC,soc_env%ediff(ispin)%matrix_struct)
+      CALL cp_fm_create(op_fm, op_struct)
+
+      IF (sggs) THEN
+              CALL cp_fm_create(SCWCdSC, gs_coeffs%matrix_struct)
+              CALL cp_fm_create(WCdSC, soc_env%ediff(ispin)%matrix_struct)
+              CALL parallel_gemm('N','N', n_virt, n_occ, nao, 1.0_dp, soc_env%CdS(ispin, ideriv),&
+                            gs_coeffs, 0.0_dp, CdSC)
+              CALL cp_fm_schur_product(CdSC,soc_env%ediff(ispin), WCdSC)
+     ELSE
+             CALL cp_fm_create(SCWCdSC, coeff%matrix_struct)
+              DO iex = 1,nex
+                CALL cp_fm_create(WCdSC_tmp(ispin,iex),soc_env%ediff(ispin)%matrix_struct)
+                CALL parallel_gemm('N','N', n_virt, n_occ, nao, 1.0_dp, soc_env%CdS(ispin, ideriv),&
+                                    evec_fm(ispin,iex), 0.0_dp, CdSC)
+                CALL cp_fm_schur_product(CdSC,soc_env%ediff(ispin), WCdSC_tmp(ispin,iex))
+              END DO
+              CALL cp_fm_create(WCdSC, virt_occ_struct)
+              CALL soc_contract_evect(WCdSC_tmp, WCdSC)
+              DO iex = 1,nex
+                 CALL cp_fm_release(WCdSC_tmp(ispin, iex))
+              END DO
+              DEALLOCATE(WCdSC_tmp)
+      END IF
+
+      IF (sggs) THEN
+              CALL parallel_gemm('N','N',nao, n_occ, n_virt, 1.0_dp, soc_env%SC(ispin), WCdSC, 0.0_dp, SCWCdSC)
+              CALL parallel_gemm('T','N',n_occ*nex, n_occ, nao, 1.0_dp, soc_env%a_coeff, SCWCdSC, 0.0_dp, op_fm)
+      ELSE
+              CALL parallel_gemm('N','N',nao, n_occ*nex, n_virt, 1.0_dp, soc_env%SC(ispin), WCdSC, 0.0_dp, SCWCdSC)
+              CALL parallel_gemm('T','N',n_occ*nex, n_occ*nex, nao, 1.0_dp, coeff, SCWCdSC, 0.0_dp, op_fm)
+      END IF
+
+      IF (sggs) THEN
+              CALL cp_fm_to_fm(op_fm, sggs_fm) 
+      ELSE
+              CALL copy_fm_to_dbcsr(op_fm, op)
+      END IF
+
+      CALL cp_fm_release(op_fm)
+      CALL cp_fm_release(WCdSC)
+      CALL cp_fm_release(SCWCdSC)
+      CALL cp_fm_release(CdSC)
+      CALL cp_fm_struct_release(virt_occ_struct)
+      CALL cp_fm_struct_release(op_struct)
+      
+
+   END SUBROUTINE dip_vel_op
 
 ! **************************************************************************************************
 !> \brief ...

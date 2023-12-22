@@ -83,6 +83,7 @@ MODULE qs_tddfpt2_soc
                                               soc_env_type
    USE qs_tddfpt2_soc_utils,            ONLY: soc_contract_evect,&
                                               soc_dipole_operator,&
+                                              dip_vel_op,&
                                               resort_evects
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos
    USE soc_pseudopotential_methods,     ONLY: V_SOC_xyz_from_pseudopotential
@@ -1015,12 +1016,12 @@ CONTAINS
          END IF
       END IF
 
-      CPWARN("DEBUG OSC")
       !Compute the dipole oscillator strengths
       soc_env%evals_a => evals_sing
       soc_env%evals_b => evals_trip
       CALL soc_dipol(qs_env, dbcsr_soc_package, soc_env, &
-                     evecs_cfm, eps_filter, dipole_form, gs_mos, log_unit)
+                     evecs_cfm, eps_filter, dipole_form, gs_mos,&
+                     evects_sing, evects_trip, log_unit)
 
       !Create final output
       !! Output unit is choosen by the keyword "UNIT_eV" and "UNIT_wn" in "SOC_PRINT" section
@@ -1218,7 +1219,6 @@ CONTAINS
          grid_info(irep, :) = k_list
       END DO
 
-      CPWARN("start building Dipole")
       CALL soc_dipole_operator(soc_env, tddfpt_control, qs_env, gs_mos)
 
       nspins = SIZE(evects_a, 1)
@@ -1476,12 +1476,14 @@ CONTAINS
 !> \param gs_mos ...
 ! **************************************************************************************************
    SUBROUTINE soc_dipol(qs_env, dbcsr_soc_package, soc_env, &
-                        soc_evecs_cfm, eps_filter, dipole_form, gs_mos,log_unit)
-      TYPE(qs_environment_type)                          :: qs_env
+                        soc_evecs_cfm, eps_filter, dipole_form, gs_mos,&
+                        evects_sing,evects_trip, log_unit)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_soc_package_type)                       :: dbcsr_soc_package
       TYPE(soc_env_type), TARGET                         :: soc_env
       TYPE(cp_cfm_type), INTENT(in)                      :: soc_evecs_cfm
       REAL(dp), INTENT(IN)                               :: eps_filter
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_sing, evects_trip
       INTEGER                                            :: dipole_form
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
@@ -1526,7 +1528,8 @@ CONTAINS
       ALLOCATE (transdip(ntot, 1))
 
       CALL get_rcs_amew_op(amew_dip, soc_env, dbcsr_soc_package, &
-                           eps_filter, qs_env, gs_mos, log_unit)
+                           eps_filter, qs_env, gs_mos,&
+                          evects_sing, evects_trip, log_unit)
 
       DO i = 1, 3 !cartesian coord x, y, z
 
@@ -1560,7 +1563,7 @@ CONTAINS
       IF (dipole_form == tddfpt_dipole_length) THEN
          osc_str(:) = 2.0_dp/3.0_dp*soc_evals(:)*osc_str(:)
       ELSE
-         osc_str(:) = 2.0_dp/3.0_dp/soc_evals(:)*osc_str(:)
+         osc_str(:) = 2.0_dp/3.0_dp*soc_evals(:)*osc_str(:)
       END IF
 
       !clean-up
@@ -1586,16 +1589,18 @@ CONTAINS
 !> \param qs_env ...
 !> \param gs_mos ...
 ! **************************************************************************************************
-   SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env, gs_mos, log_unit)
+   SUBROUTINE get_rcs_amew_op(amew_op, soc_env, dbcsr_soc_package, eps_filter, qs_env, gs_mos,&
+                              evects_sing, evects_trip, log_unit)
 
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:), &
          INTENT(OUT)                                     :: amew_op
       TYPE(soc_env_type), TARGET                         :: soc_env
       TYPE(dbcsr_soc_package_type)                       :: dbcsr_soc_package
       REAL(dp), INTENT(IN)                               :: eps_filter
-      TYPE(qs_environment_type)                          :: qs_env
+      TYPE(qs_environment_type) , POINTER                :: qs_env
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects_sing, evects_trip
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'get_rcs_amew_op'
 
@@ -1616,6 +1621,7 @@ CONTAINS
                                                             dbcsr_work
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
+      LOGICAL                                            :: vel_rep
       !!DEBUG
       INTEGER                                            :: log_unit
 
@@ -1632,8 +1638,10 @@ CONTAINS
       !! Fist case for length, secound for velocity-representation
       IF (ASSOCIATED(soc_env%dipmat)) THEN
           ao_op => soc_env%dipmat
+          vel_rep = .FALSE.
       ELSE
           ao_op => soc_env%dipmat_ao
+          vel_rep = .TRUE.
       END IF
       nsg = SIZE(soc_env%evals_a)
       ntp = nsg; nex = nsg !all the same by construction, keep them separate for clarity
@@ -1715,20 +1723,20 @@ CONTAINS
 
          ! The GS-GS contribution
          CALL cp_fm_set_element(amew_op(i), 1, 1, gsgs_op(i))
-
+        
          ! Compute the operator in the MO basis
          CALL cp_dbcsr_sm_fm_multiply(ao_op_i, gs_coeffs, vec_op, ncol=nactive)
-         !!DEBUG
-        ! IF (log_unit > 0) THEN
-        !         !CALL dbcsr_print(ao_op_i, unit_nr=log_unit)
-        !         CALL cp_fm_write_formatted(vec_op,log_unit)
-        ! END IF
-         !!END DEBUG
          CALL cp_fm_get_submatrix(gs_fm, mo_op)  ! instead of prod_fm
 
          ! Compute the ground-state/singlet components. ao_op*gs_coeffs already stored in vec_op
-         CALL parallel_gemm('T', 'N', nactive*nsg, nactive, nao, &
-                            1.0_dp, soc_env%a_coeff, vec_op, 0.0_dp, sggs_fm)
+         IF (vel_rep) THEN
+                 CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE.,&
+                         gs_coeffs, sggs_fm, log_unit)
+         ELSE
+                 CALL parallel_gemm('T', 'N', nactive*nsg, nactive, nao, &
+                                    1.0_dp, soc_env%a_coeff, vec_op, 0.0_dp, sggs_fm)
+         END IF
+
          DO isg = 1, nsg
             CALL cp_fm_get_submatrix(fm=sggs_fm, &
                                      target_m=sggs_block, &
@@ -1752,15 +1760,19 @@ CONTAINS
                              0.0_dp, dbcsr_ovlp, &
                              filter_eps=eps_filter)
 
-         !then the operator in the LR orbital basis
-         CALL dbcsr_multiply('N', 'N', 1.0_dp, &
-                             ao_op_i, dbcsr_sg, &
-                             0.0_dp, dbcsr_work, &
-                             filter_eps=eps_filter)
-         CALL dbcsr_multiply('T', 'N', 1.0_dp, &
-                             dbcsr_sg, dbcsr_work, &
-                             0.0_dp, dbcsr_prod, &
-                             filter_eps=eps_filter)
+         IF (vel_rep) THEN
+                 CALL dip_vel_op(soc_env, qs_env, evects_sing, dbcsr_prod, i, .FALSE.)
+         ELSE
+                 !then the operator in the LR orbital basis
+                 CALL dbcsr_multiply('N', 'N', 1.0_dp, &
+                                     ao_op_i, dbcsr_sg, &
+                                     0.0_dp, dbcsr_work, &
+                                     filter_eps=eps_filter)
+                 CALL dbcsr_multiply('T', 'N', 1.0_dp, &
+                                     dbcsr_sg, dbcsr_work, &
+                                     0.0_dp, dbcsr_prod, &
+                                     filter_eps=eps_filter)
+         END IF
 
          !use the soc routine, it is compatible
          CALL rcs_amew_soc_elements(dbcsr_tmp, &
@@ -1795,14 +1807,18 @@ CONTAINS
                              filter_eps=eps_filter)
 
          !the operator in the LR orbital basis
-         CALL dbcsr_multiply('N', 'N', 1.0_dp, &
-                             ao_op_i, dbcsr_tp, &
-                             0.0_dp, dbcsr_work, &
-                             filter_eps=eps_filter)
-         CALL dbcsr_multiply('T', 'N', 1.0_dp, &
-                             dbcsr_tp, dbcsr_work, &
-                             0.0_dp, dbcsr_prod, &
-                             filter_eps=eps_filter)
+         IF (vel_rep) THEN
+                 CALL dip_vel_op(soc_env, qs_env, evects_trip, dbcsr_prod, i, .TRUE.)
+         ELSE
+                 CALL dbcsr_multiply('N', 'N', 1.0_dp, &
+                                     ao_op_i, dbcsr_tp, &
+                                     0.0_dp, dbcsr_work, &
+                                     filter_eps=eps_filter)
+                 CALL dbcsr_multiply('T', 'N', 1.0_dp, &
+                                     dbcsr_tp, dbcsr_work, &
+                                     0.0_dp, dbcsr_prod, &
+                                     filter_eps=eps_filter)
+         END IF
 
          CALL rcs_amew_soc_elements(dbcsr_tmp, &
                                     dbcsr_prod, &
