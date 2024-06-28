@@ -214,13 +214,14 @@ CONTAINS
 !> \param do_admm ...
 !> \param do_hfxlr ...
 !> \param do_exck ...
+!> \param do_sf ...
 !> \param qs_env         Quickstep environment
 !> \param sub_env        parallel group environment
 !> \par History
 !>    * 02.2017 created [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, &
-                                         do_hfxlr, do_exck, do_Sf qs_env, sub_env)
+                                         do_hfxlr, do_exck, do_sf qs_env, sub_env)
       TYPE(tddfpt_work_matrices), INTENT(out)            :: work_matrices
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
@@ -232,8 +233,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_create_work_matrices'
 
-      INTEGER                                            :: handle, igroup, ispin, jspin, istate, nao, &
-                                                            nao_aux, natom, ngroups, nspins
+      INTEGER                                            :: handle, igroup, ispin, istate, jspin, &
+                                                            nao, nao_aux, natom, ngroups, nspins
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
@@ -318,11 +319,11 @@ CONTAINS
       IF (sub_env%is_split) THEN
          DO ispin = 1, nspins
             IF (do_sf) THEN
-                CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
-                                     ncol_global=nmo_occ(ispin)-1, context=sub_env%blacs_env)
+               CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
+                                        ncol_global=nmo_occ(ispin) - 1, context=sub_env%blacs_env)
             ELSE
                CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
-                                     ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
+                                        ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
             END IF
          END DO
 

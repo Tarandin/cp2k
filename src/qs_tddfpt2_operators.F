@@ -19,10 +19,6 @@ MODULE qs_tddfpt2_operators
    USE cp_fm_basic_linalg,              ONLY: cp_fm_column_scale,&
                                               cp_fm_scale_and_add
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type
-   USE cp_output_handling,              ONLY: cp_print_key_unit_nr !!DEBUG
-   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
-                                              cp_logger_get_default_unit_nr,&
-                                              cp_logger_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
                                               cp_fm_release,&
@@ -96,25 +92,26 @@ CONTAINS
 !> \param gs_mos      molecular orbitals optimised for the ground state (only occupied orbital
 !>                    energies [component %evals_occ] are needed)
 !> \param matrix_ks   Kohn-Sham matrix
+!> \param do_sf ...
 !> \par History
 !>    * 05.2016 initialise all matrix elements in one go [Sergey Chulkov]
 !>    * 03.2017 renamed from tddfpt_init_energy_diff(), altered prototype [Sergey Chulkov]
 !> \note Based on the subroutine p_op_l1() which was originally created by
 !>       Thomas Chassaing on 08.2002.
 ! **************************************************************************************************
-SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix_ks, do_sf)
+   SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix_ks, do_sf)
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: Aop_evects, evects, S_evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(in)       :: matrix_ks
+      LOGICAL, INTENT(IN)                                :: do_sf
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_apply_energy_diff'
 
-      INTEGER                                            :: handle, ispin, ivect, nactive, nao, &
-                                                            nspins, nvects, jspin
+      INTEGER                                            :: handle, ispin, ivect, jspin, nactive, &
+                                                            nao, nspins, nvects
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
       TYPE(cp_fm_type)                                   :: hevec
-      LOGICAL, INTENT(IN)                                :: do_sf
 
       CALL timeset(routineN, handle)
 
@@ -494,6 +491,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
 !> \param work_rho_ia_ao_asymm ...
 !> \param work_hmat_asymm ...
 !> \param wfm_rho_orb ...
+!> \param do_sf ...
 !> \par History
 !>    * 05.2016 compute all exact-exchange terms in one go [Sergey Chulkov]
 !>    * 03.2017 code related to ADMM correction is now moved to tddfpt_apply_admm_correction()
@@ -507,7 +505,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: Aop_evects, evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
-      LOGICAL, INTENT(in)                                :: do_admm,do_sf
+      LOGICAL, INTENT(in)                                :: do_admm
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(INOUT)    :: work_rho_ia_ao_symm
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(INOUT), &
@@ -516,6 +514,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(INOUT), &
          TARGET                                          :: work_hmat_asymm
       TYPE(cp_fm_type), INTENT(IN)                       :: wfm_rho_orb
+      LOGICAL, INTENT(in)                                :: do_sf
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'tddfpt_apply_hfx'
 
@@ -525,7 +524,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
       LOGICAL                                            :: do_hfx
       REAL(kind=dp)                                      :: alpha
       TYPE(admm_type), POINTER                           :: admm_env
-      TYPE(section_vals_type), POINTER                   :: hfx_section,input
+      TYPE(section_vals_type), POINTER                   :: hfx_section, input
 
       CALL timeset(routineN, handle)
 
@@ -568,7 +567,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
                CALL parallel_gemm('N', 'T', nao, nao, nactive(ispin), 0.5_dp, evects(ispin, ivect), &
                                   gs_mos(ispin)%mos_occ, 0.0_dp, wfm_rho_orb)
                CALL parallel_gemm('N', 'T', nao, nao, nactive(ispin), 0.5_dp, gs_mos(ispin)%mos_occ, &
-                                  evects(ispin, ivect), 1.0_dp,wfm_rho_orb)
+                                  evects(ispin, ivect), 1.0_dp, wfm_rho_orb)
 
                CALL dbcsr_set(work_hmat_symm(ispin)%matrix, 0.0_dp)
                IF (do_admm) THEN
@@ -609,7 +608,7 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
                CALL parallel_gemm('N', 'T', nao, nao, nactive(ispin), 0.5_dp, evects(ispin, ivect), &
                                   gs_mos(ispin)%mos_occ, 0.0_dp, wfm_rho_orb)
                CALL parallel_gemm('N', 'T', nao, nao, nactive(ispin), -0.5_dp, gs_mos(ispin)%mos_occ, &
-                                     evects(ispin, ivect), 1.0_dp, wfm_rho_orb)
+                                  evects(ispin, ivect), 1.0_dp, wfm_rho_orb)
 
                CALL dbcsr_set(work_hmat_asymm(ispin)%matrix, 0.0_dp)
                IF (do_admm) THEN
@@ -639,13 +638,12 @@ SUBROUTINE tddfpt_apply_energy_diff(Aop_evects, evects, S_evects, gs_mos, matrix
             ELSE
                DO ispin = 1, nspins
                   CALL cp_dbcsr_sm_fm_multiply(work_hmat_asymm(ispin)%matrix, gs_mos(ispin)%mos_occ, &
-                                            Aop_evects(ispin, ivect), ncol=nactive(ispin), &
-                                            alpha=alpha, beta=1.0_dp)
+                                               Aop_evects(ispin, ivect), ncol=nactive(ispin), &
+                                               alpha=alpha, beta=1.0_dp)
                END DO
             END IF
          END DO
       END IF
-
 
       CALL timestop(handle)
 

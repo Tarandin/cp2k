@@ -2534,7 +2534,7 @@ CONTAINS
 
       mspin = 1
       IF (hfx_treat_lsd_in_core) mspin = nspins
-      IF (SIZE(rho_ao,1) == 1) THEN
+      IF (SIZE(rho_ao, 1) == 1) THEN
          mspin = 1
          nspins = 1
       END IF

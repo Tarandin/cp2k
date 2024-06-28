@@ -1,0 +1,72 @@
+&GLOBAL
+   PROJECT_NAME SF_He
+   RUN_TYPE ENERGY
+&END GLOBAL
+&FORCE_EVAL
+   &PROPERTIES
+      &TDDFPT
+         NSTATES 3
+         SF HS
+         KERNEL FULL
+         CONVERGENCE 1.0E-6
+         MAX_ITER 15
+      &END TDDFPT
+   &END PROPERTIES
+   &DFT
+      BASIS_SET_FILE_NAME EMSL_BASIS_SETS
+      POTENTIAL_FILE_NAME POTENTIAL
+      UKS
+      MULTIP 1
+      &SCF
+         EPS_SCF 1.0E-7
+         MAX_SCF 10
+         SCF_GUESS ATOMIC
+         &OUTER_SCF
+            MAX_SCF 20
+            EPS_SCF 1.0E-7
+         &END OUTER_SCF
+         &OT
+           PRECONDITIONER FULL_KINETIC
+           MINIMIZER DIIS
+           ROTATION
+         &END OT
+      &END SCF
+      &MGRID 
+         CUTOFF 300
+         REL_CUTOFF 60
+         NGRIDS 3
+      &END MGRID
+      &QS
+         EPS_DEFAULT 1.0E-8
+         METHOD GAPW
+      &END QS
+      &POISSON
+         PERIODIC NONE
+         PSOLVER WAVELET
+      &END POISSON
+      &XC
+         &XC_FUNCTIONAL
+            &PBE
+               SCALE_X 0.0
+               SCALE_C 0.0
+            &END PBE
+         &END XC_FUNCTIONAL
+         &HF
+            FRACTION 1.0
+         &END HF
+      &END XC
+   &END DFT
+   &SUBSYS
+      &COORD
+         He 3.0 3.0 3.0
+      &END COORD
+      &CELL 
+         ABC 6.0 6.0 6.0
+         PERIODIC NONE
+      &END CELL
+      &KIND He
+         BASIS_SET Ahlrichs-def2-SVP
+         POTENTIAL ALL
+      &END KIND
+   &END SUBSYS
+&END FORCE_EVAL
