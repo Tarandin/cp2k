@@ -480,6 +480,9 @@ MODULE cp_control_types
       !> for full kernel, do we have long-range HFX and/or Kxc potential
       LOGICAL                              :: do_hfxlr = .FALSE.
       LOGICAL                              :: do_exck = .FALSE.
+      !> do we want sf_calculations
+      LOGICAL                              :: do_sf = .FALSE.
+      INTEGER                              :: sf_type = 1
       !> options used in sTDA calculation (Kernel)
       TYPE(stda_control_type)              :: stda_control = stda_control_type()
       !> algorithm to correct orbital energies

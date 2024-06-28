@@ -217,18 +217,18 @@ CONTAINS
 !>    * 02.2017 created [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, do_exck, &
-                                          qs_env, sub_env)
+                                         do_sf, qs_env, sub_env)
       TYPE(tddfpt_work_matrices), INTENT(out)            :: work_matrices
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       INTEGER, INTENT(in)                                :: nstates
-      LOGICAL, INTENT(in)                                :: do_hfx, do_admm, do_exck
+      LOGICAL, INTENT(in)                                :: do_hfx, do_admm, do_exck, do_sf
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(tddfpt_subgroup_env_type), INTENT(in)         :: sub_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_create_work_matrices'
 
-      INTEGER                                            :: handle, igroup, ispin, istate, nao, &
+      INTEGER                                            :: handle, igroup, ispin, jspin, istate, nao, &
                                                             nao_aux, natom, ngroups, nspins
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
       TYPE(admm_type), POINTER                           :: admm_env
@@ -298,18 +298,25 @@ CONTAINS
 
       ALLOCATE (work_matrices%S_C0(nspins))
       DO ispin = 1, nspins
-         CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, work_matrices%S_C0(ispin))
+         jspin = ispin
+         IF (do_sf) jspin = 2
+         CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(jspin)%pool, work_matrices%S_C0(ispin))
 
-         CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, gs_mos(ispin)%mos_occ, work_matrices%S_C0(ispin), &
-                                      ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
-         CALL parallel_gemm('N', 'T', nao, nao, nmo_occ(ispin), 1.0_dp, work_matrices%S_C0(ispin), &
-                            gs_mos(ispin)%mos_occ, 0.0_dp, work_matrices%S_C0_C0T(ispin))
+         CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, gs_mos(jspin)%mos_occ, work_matrices%S_C0(ispin), &
+                                      ncol=nmo_occ(jspin), alpha=1.0_dp, beta=0.0_dp)
+         CALL parallel_gemm('N', 'T', nao, nao, nmo_occ(jspin), 1.0_dp, work_matrices%S_C0(ispin), &
+                            gs_mos(jspin)%mos_occ, 0.0_dp, work_matrices%S_C0_C0T(ispin))
       END DO
 
       IF (sub_env%is_split) THEN
          DO ispin = 1, nspins
-            CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
+            IF (do_sf) THEN
+                CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
+                                     ncol_global=nmo_occ(ispin)-1, context=sub_env%blacs_env)
+            ELSE
+               CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
                                      ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
+            END IF
          END DO
 
          ALLOCATE (work_matrices%evects_sub(nspins, nstates), work_matrices%Aop_evects_sub(nspins, nstates))
@@ -482,6 +489,8 @@ CONTAINS
          ALLOCATE (work_matrices%hfx_fm_ao_ao)
          CALL cp_fm_create(work_matrices%hfx_fm_ao_ao, fm_struct)
          CALL cp_fm_struct_release(fm_struct)
+
+         IF (do_sf) nspins = 1
 
          CALL dbcsr_allocate_matrix_set(work_matrices%hfx_rho_ao_symm, nspins)
          CALL dbcsr_allocate_matrix_set(work_matrices%hfx_rho_ao_asymm, nspins)

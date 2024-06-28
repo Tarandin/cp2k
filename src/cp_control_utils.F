@@ -50,7 +50,7 @@ MODULE cp_control_utils
         sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, sccs_derivative_fft, &
         sccs_fattebert_gygi, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, &
         sic_mauri_us, sic_none, slater, tddfpt_dipole_length, tddfpt_excitations, &
-        tddfpt_kernel_stda, use_mom_ref_user
+        tddfpt_kernel_stda, use_mom_ref_user, tddfpt_sf_hs,tddfpt_sf_ls, tddfpt_sf_b
    USE input_cp2k_check,                ONLY: xc_functionals_expand
    USE input_cp2k_dft,                  ONLY: create_dft_section
    USE input_enumeration_types,         ONLY: enum_i2c,&
@@ -1353,7 +1353,7 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
-      INTEGER                                            :: handle, irep, isize, nrep
+      INTEGER                                            :: handle,irep, isize, nrep
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: inds
       LOGICAL                                            :: do_ewald, do_exchange, expl, explicit, &
                                                             multigrid_set
@@ -1385,6 +1385,7 @@ CONTAINS
       CALL section_vals_val_get(t_section, "DO_LRIGPW", l_val=t_control%do_lrigpw)
       CALL section_vals_val_get(t_section, "ADMM_KERNEL_CORRECTION_SYMMETRIC", l_val=t_control%admm_symm)
       CALL section_vals_val_get(t_section, "ADMM_KERNEL_XC_CORRECTION", l_val=t_control%admm_xc_correction)
+      !CALL section_vals_val_get(t_section, "SF", l_val=t_control%do_sf)
 
       ! read automatically generated auxiliary basis for LRI
       CALL section_vals_val_get(t_section, "AUTO_BASIS", n_rep_val=nrep)
@@ -1422,6 +1423,12 @@ CONTAINS
 
       IF (t_control%conv < 0) &
          t_control%conv = ABS(t_control%conv)
+
+      CALL section_vals_val_get(t_section, "SF", explicit=explicit)
+      IF (explicit) THEN 
+         t_control%do_sf = .TRUE.
+         CALL section_vals_val_get(t_section, "SF",i_val=t_control%sf_type)
+      END IF
 
       ! DIPOLE_MOMENTS subsection
       dipole_section => section_vals_get_subs_vals(t_section, "DIPOLE_MOMENTS")

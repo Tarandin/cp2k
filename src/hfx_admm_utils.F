@@ -2425,6 +2425,10 @@ CONTAINS
 
       mspin = 1
       IF (hfx_treat_lsd_in_core) mspin = nspins
+      IF (SIZE(rho_ao,1) == 1) THEN
+         mspin = 1
+         nspins = 1
+      END IF
 
       matrix_ks_kp(1:nspins, 1:1) => matrix_ks(1:nspins)
       rho_ao_kp(1:nspins, 1:1) => rho_ao(1:nspins)
