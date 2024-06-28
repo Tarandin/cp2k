@@ -727,7 +727,7 @@ CONTAINS
                                   kind_of, basis_parameter, get_max_vals_spin=.FALSE., antisymmetric=is_anti_symmetric)
          END DO
 
-         IF (nspins == 2 .AND. SIZE(rho_ao,1) == 2) THEN
+         IF (nspins == 2 .AND. SIZE(rho_ao, 1) == 2) THEN
             ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), nkimages))
             DO img = 1, nkimages
                CALL get_full_density(para_env, full_density_beta(:, img), rho_ao(2, img)%matrix, shm_number_of_p_entries, &

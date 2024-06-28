@@ -691,8 +691,8 @@ MODULE input_constants
                                                xas_tdp_uks = 2
 
    ! Options for Spin-Flip TDDFPT
-   INTEGER, PARAMETER, PUBLIC               :: tddfpt_sf_hs = 1 ,&
-                                               tddfpt_sf_ls = 2,&
+   INTEGER, PARAMETER, PUBLIC               :: tddfpt_sf_hs = 1, &
+                                               tddfpt_sf_ls = 2, &
                                                tddfpt_sf_b = 3
 
    ! Form of dipole operator for TDDFPT oscillator strength calculation

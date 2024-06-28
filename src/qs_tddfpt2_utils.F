@@ -27,8 +27,7 @@ MODULE qs_tddfpt2_utils
                                               cp_fm_set_all,&
                                               cp_fm_to_fm,&
                                               cp_fm_to_fm_submat,&
-                                              cp_fm_type,&
-                                              cp_fm_write_formatted
+                                              cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
@@ -914,6 +913,7 @@ CONTAINS
 !> \param evals    guessed transition energies (initialised on exit)
 !> \param gs_mos   occupied and virtual molecular orbitals optimised for the ground state
 !> \param log_unit output unit
+!> \param do_sf ...
 !> \par History
 !>    * 05.2016 created as tddfpt_guess() [Sergey Chulkov]
 !>    * 06.2016 renamed, altered prototype, supports spin-polarised density [Sergey Chulkov]
@@ -928,7 +928,7 @@ CONTAINS
 !>       a restart file).
 !>       \endparblock
 ! **************************************************************************************************
-SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
+   SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(inout)   :: evects
       REAL(kind=dp), DIMENSION(:), INTENT(inout)         :: evals
       TYPE(tddfpt_ground_state_mos), &
@@ -939,11 +939,8 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_guess_vectors'
 
       CHARACTER(len=5)                                   :: spin_label, spin_label_2
-      INTEGER                                            :: handle, imo_occ, imo_virt, ind, ispin, &
-                                                            istate, jspin, nspins, nstates, &
-                                                            nstates_occ_virt_alpha, &
-                                                            nstates_selected,&
-                                                            ispin_occ, ispin_virt
+      INTEGER :: handle, imo_occ, imo_virt, ind, ispin, ispin_occ, ispin_virt, istate, jspin, &
+         nspins, nstates, nstates_occ_virt_alpha, nstates_selected
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: inds
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ_avail, nmo_occ_selected, &
                                                             nmo_virt_selected
@@ -969,19 +966,19 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
          nmo_virt_selected(2) = MIN(SIZE(gs_mos(2)%evals_virt), nstates)
          nmo_occ_selected(2) = 0
          nmo_virt_selected(1) = 0
-         DO ispin = 1,nspins
-             CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct_evects(ispin)%struct)
+         DO ispin = 1, nspins
+            CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct_evects(ispin)%struct)
          END DO
       ELSE
          DO ispin = 1, nspins
-             ! number of occupied orbitals for each spin component
-             nmo_occ_avail(ispin) = SIZE(gs_mos(ispin)%evals_occ)
-             ! number of occupied and virtual orbitals which can potentially
-             ! contribute to the excited states in question.
-             nmo_occ_selected(ispin) = MIN(nmo_occ_avail(ispin), nstates)
-             nmo_virt_selected(ispin) = MIN(SIZE(gs_mos(ispin)%evals_virt), nstates)
+            ! number of occupied orbitals for each spin component
+            nmo_occ_avail(ispin) = SIZE(gs_mos(ispin)%evals_occ)
+            ! number of occupied and virtual orbitals which can potentially
+            ! contribute to the excited states in question.
+            nmo_occ_selected(ispin) = MIN(nmo_occ_avail(ispin), nstates)
+            nmo_virt_selected(ispin) = MIN(SIZE(gs_mos(ispin)%evals_virt), nstates)
 
-             CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct_evects(ispin)%struct)
+            CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct_evects(ispin)%struct)
          END DO
       END IF
 
@@ -989,33 +986,22 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
       !        however we need a special version of the subroutine sort() in order to do so
       IF (do_sf) THEN
               !! Only different spins for SF
-              nstates_selected = nmo_occ_selected(1) * nmo_virt_selected(2) &
-                      + nmo_occ_selected(2) * nmo_virt_selected(1)
+         nstates_selected = nmo_occ_selected(1)*nmo_virt_selected(2) &
+                            + nmo_occ_selected(2)*nmo_virt_selected(1)
       ELSE
-              nstates_selected = DOT_PRODUCT(nmo_occ_selected(1:nspins), nmo_virt_selected(1:nspins))
+         nstates_selected = DOT_PRODUCT(nmo_occ_selected(1:nspins), nmo_virt_selected(1:nspins))
       END IF
 
       ALLOCATE (inds(nstates_selected))
       ALLOCATE (e_virt_minus_occ(nstates_selected))
 
-     ! !!DEBUG
-     ! DO ispin = 1,2
-     !   WRITE(log_unit,'(2I3)') ispin, SIZE(gs_mos)
-     !   DO imo_occ = 1, SIZE(gs_mos(ispin)%evals_occ)
-     !           WRITE(log_unit, '(A3,I3, F16.10)') "occ", imo_occ,gs_mos(ispin)%evals_occ(imo_occ)*evolt
-     !   END DO
-     !   DO imo_virt = 1, SIZE(gs_mos(ispin)%evals_virt)
-     !           WRITE(log_unit,'(A3,I3,F16.10)') "virt", imo_virt,gs_mos(ispin)%evals_virt(imo_virt)*evolt
-     !   END DO
-     ! END DO
-
       istate = 0
       DO ispin = 1, nspins
          IF (do_sf) THEN
                  !! We assume high spin for now
-                 jspin = 3-ispin
+            jspin = 3 - ispin
          ELSE
-                 jspin = ispin
+            jspin = ispin
          END IF
          DO imo_occ = 1, nmo_occ_selected(ispin)
             ! Here imo_occ enumerate Occupied orbitals in inverse order (from the last to the first element)
@@ -1060,32 +1046,32 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
          ELSE
             ind = inds(istate) - 1
             IF (do_sf) THEN
-                    IF (.TRUE.) THEN
-                            spin_label = '(alp)'
-                            spin_label_2 = '(bet)'
-                            ispin_virt = 2
-                            ispin_occ = 1
-                    ELSE
-                            spin_label = '(bet)'
-                            spin_label_2 = '(alp)'
-                            ispin_virt = 1
-                            ispin_occ = 2
-                    END IF
+               IF (.TRUE.) THEN
+                  spin_label = '(alp)'
+                  spin_label_2 = '(bet)'
+                  ispin_virt = 2
+                  ispin_occ = 1
+               ELSE
+                  spin_label = '(bet)'
+                  spin_label_2 = '(alp)'
+                  ispin_virt = 1
+                  ispin_occ = 2
+               END IF
             ELSE
-                    IF (nspins > 1) THEN
-                       IF (ind < nstates_occ_virt_alpha) THEN
-                          ispin_virt = 1
-                          ispin_occ = ispin_virt
-                          spin_label = '(alp)'
-                          spin_label_2 = '(alp)'
-                       ELSE
-                          ispin_virt = 2
-                          ispin_occ = ispin_virt
-                          ind = ind - nstates_occ_virt_alpha
-                          spin_label = '(bet)'
-                          spin_label_2 = '(bet)'
-                       END IF
-                    END IF
+               IF (nspins > 1) THEN
+                  IF (ind < nstates_occ_virt_alpha) THEN
+                     ispin_virt = 1
+                     ispin_occ = ispin_virt
+                     spin_label = '(alp)'
+                     spin_label_2 = '(alp)'
+                  ELSE
+                     ispin_virt = 2
+                     ispin_occ = ispin_virt
+                     ind = ind - nstates_occ_virt_alpha
+                     spin_label = '(bet)'
+                     spin_label_2 = '(bet)'
+                  END IF
+               END IF
             END IF
 
             imo_occ = nmo_occ_avail(ispin_occ) - ind/nmo_virt_selected(ispin_virt)
@@ -1094,7 +1080,7 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
 
             IF (log_unit > 0) &
                WRITE (log_unit, '(T7,I8,T24,I8,T37,A5,T45,I8,T54,A5,T60,F14.5)') &
-               istate, imo_occ, spin_label, nmo_occ_avail(ispin_virt) + imo_virt, spin_label_2,&
+               istate, imo_occ, spin_label, nmo_occ_avail(ispin_virt) + imo_virt, spin_label_2, &
                e_virt_minus_occ(istate)*evolt
 
             DO jspin = 1, nspins
@@ -1103,15 +1089,15 @@ SUBROUTINE tddfpt_guess_vectors(evects, evals, gs_mos, log_unit, do_sf)
                CALL cp_fm_set_all(evects(jspin, istate), 0.0_dp)
 
                IF (do_sf) THEN
-                       CALL cp_fm_to_fm(gs_mos(3-jspin)%mos_virt, evects(ispin_occ, istate),&
-                               ncol=1, source_start=imo_virt, target_start=imo_occ)
-                       !CALL cp_fm_write_formatted(evects(ispin_occ,istate), log_unit, "EVECT GUESS")
-                       !CALL cp_fm_write_formatted(gs_mos(jspin)%mos_virt, log_unit, "GS Virt MOs")
+                  CALL cp_fm_to_fm(gs_mos(3 - jspin)%mos_virt, evects(ispin_occ, istate), &
+                                   ncol=1, source_start=imo_virt, target_start=imo_occ)
+                  !CALL cp_fm_write_formatted(evects(ispin_occ,istate), log_unit, "EVECT GUESS")
+                  !CALL cp_fm_write_formatted(gs_mos(jspin)%mos_virt, log_unit, "GS Virt MOs")
                ELSE
-                       IF (jspin == ispin_occ) THEN
-                                CALL cp_fm_to_fm(gs_mos(ispin_virt)%mos_virt, evects(ispin_occ, istate), &
-                                        ncol=1, source_start=imo_virt, target_start=imo_occ)
-                       END IF
+                  IF (jspin == ispin_occ) THEN
+                     CALL cp_fm_to_fm(gs_mos(ispin_virt)%mos_virt, evects(ispin_occ, istate), &
+                                      ncol=1, source_start=imo_virt, target_start=imo_occ)
+                  END IF
                END IF
             END DO
          END IF

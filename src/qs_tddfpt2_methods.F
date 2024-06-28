@@ -40,8 +40,6 @@ MODULE qs_tddfpt2_methods
                                               tddfpt_kernel_full,&
                                               tddfpt_kernel_none,&
                                               tddfpt_kernel_stda,&
-                                              tddfpt_sf_hs,&
-                                              tddfpt_sf_ls,&
                                               tddfpt_sf_b
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
@@ -136,11 +134,11 @@ CONTAINS
 
       INTEGER                                            :: handle, ispin, istate, log_unit, mult, &
                                                             my_state, nao, nocc, nspins, &
-                                                            nstate_max,nstates, nvirt,old_state,&
+                                                            nstate_max, nstates, nvirt, old_state, &
                                                             sf_type
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
-                                                            do_soc, do_sf, lmult_tmp, state_change
+                                                            do_sf, do_soc, lmult_tmp, state_change
       REAL(kind=dp)                                      :: gsmin, gsval, xsval
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
       TYPE(cell_type), POINTER                           :: cell
@@ -240,10 +238,10 @@ CONTAINS
       ! components of the dipole operator
       ! If using SF, we do not have our corresponding GS yet.
       IF (.NOT. do_sf) CALL tddfpt_dipole_operator(dipole_op_mos_occ, &
-                                  tddfpt_control,gs_mos, qs_env)
+                                                   tddfpt_control, gs_mos, qs_env)
 
       nspins = SIZE(gs_mos)
-      IF (do_sf .AND. .NOT.(sf_type == tddfpt_sf_b)) THEN
+      IF (do_sf .AND. .NOT. (sf_type == tddfpt_sf_b)) THEN
          !! For HS Spin-Flip, only alpha → beta or belta → alpha will be used
          nspins = 1
       END IF
@@ -254,7 +252,7 @@ CONTAINS
          IF (mult > 2) &
             CALL cp_warn(__LOCATION__, "There is a convergence issue for multiplicity >= 3")
       ELSE
-              IF (tddfpt_control%rks_triplets) THEN
+         IF (tddfpt_control%rks_triplets) THEN
             mult = 3
          ELSE
             mult = 1
@@ -294,10 +292,10 @@ CONTAINS
       END IF
 
       IF (nstates > nstate_max) THEN
-           CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
-           CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
-           nstates = nstate_max
-           tddfpt_control%nstates = nstate_max
+         CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
+         CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
+         nstates = nstate_max
+         tddfpt_control%nstates = nstate_max
       END IF
 
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
@@ -308,12 +306,12 @@ CONTAINS
 
          ! allocate pools and work matrices
          nstates = tddfpt_control%nstates
-          IF (nstates > nstate_max) THEN
-             CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
-             CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
-             nstates = nstate_max
-             tddfpt_control%nstates = nstate_max
-          END IF
+         IF (nstates > nstate_max) THEN
+            CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
+            CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
+            nstates = nstate_max
+            tddfpt_control%nstates = nstate_max
+         END IF
          CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, do_exck, &
                                           do_sf, qs_env, sub_env)
 
@@ -818,8 +816,8 @@ CONTAINS
       CHARACTER(len=20)                                  :: nstates_str
       INTEGER                                            :: energy_unit, handle, iter, log_unit, &
                                                             niters, nstates_read
-      LOGICAL                                            :: do_admm, do_exck, do_soc, explicit, &
-                                                            is_restarted, do_sf
+      LOGICAL                                            :: do_admm, do_exck, do_sf, do_soc, &
+                                                            explicit, is_restarted
       REAL(kind=dp)                                      :: conv
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -930,11 +928,11 @@ CONTAINS
       log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, &
                                       "GUESS_VECTORS", extension=".tddfptLog")
       CALL tddfpt_guess_vectors(evects=evects, evals=evals, &
-              gs_mos=gs_mos, log_unit=log_unit, do_sf=do_sf)
+                                gs_mos=gs_mos, log_unit=log_unit, do_sf=do_sf)
       CALL cp_print_key_finished_output(log_unit, logger, &
                                         tddfpt_print_section, "GUESS_VECTORS")
 
-      CALL tddfpt_orthogonalize_psi1_psi0(evects,work_matrices%S_C0_C0T, do_sf)
+      CALL tddfpt_orthogonalize_psi1_psi0(evects, work_matrices%S_C0_C0T, do_sf)
       CALL tddfpt_orthonormalize_psi1_psi1(evects, &
                                            nstates, &
                                            S_evects, &
@@ -1061,8 +1059,8 @@ CONTAINS
 
       IF (do_sf) THEN
          CALL tddfpt_dipole_operator(dipole_op_mos_occ, &
-                                  tddfpt_control,gs_mos, qs_env,&
-                                  evects(:,1))
+                                     tddfpt_control, gs_mos, qs_env, &
+                                     evects(:, 1))
       END IF
 
       ALLOCATE (ostrength(nstates))
@@ -1151,7 +1149,6 @@ CONTAINS
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ
       LOGICAL, INTENT(in)                                :: lmult_tmp
-      LOGICAL                                            ::  do_sf
       TYPE(section_vals_type), POINTER                   :: xc_section
       TYPE(full_kernel_env_type), TARGET                 :: full_kernel_env, kernel_env_admm_aux
 
@@ -1159,6 +1156,7 @@ CONTAINS
 
       INTEGER                                            :: handle, ispin, istate, log_unit, mult, &
                                                             nspins
+      LOGICAL                                            :: do_sf
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_mult, ostrength_mult
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: evects_mult
 
@@ -1207,7 +1205,7 @@ CONTAINS
          CALL release_kernel_env(kernel_env%full_kernel)
          CALL tddfpt_release_work_matrices(work_matrices, sub_env)
          CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, tddfpt_control%do_hfx, tddfpt_control%do_admm, &
-                 tddfpt_control%do_exck,do_sf,qs_env, sub_env)
+                                          tddfpt_control%do_exck, do_sf, qs_env, sub_env)
       END IF
 
       DO istate = 1, nstates

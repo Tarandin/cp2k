@@ -50,7 +50,7 @@ MODULE cp_control_utils
         sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, sccs_derivative_fft, &
         sccs_fattebert_gygi, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, &
         sic_mauri_us, sic_none, slater, tddfpt_dipole_length, tddfpt_excitations, &
-        tddfpt_kernel_stda, use_mom_ref_user, tddfpt_sf_hs,tddfpt_sf_ls, tddfpt_sf_b
+        tddfpt_kernel_stda, use_mom_ref_user
    USE input_cp2k_check,                ONLY: xc_functionals_expand
    USE input_cp2k_dft,                  ONLY: create_dft_section
    USE input_enumeration_types,         ONLY: enum_i2c,&
@@ -1353,7 +1353,7 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
-      INTEGER                                            :: handle,irep, isize, nrep
+      INTEGER                                            :: handle, irep, isize, nrep
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: inds
       LOGICAL                                            :: do_ewald, do_exchange, expl, explicit, &
                                                             multigrid_set
@@ -1425,9 +1425,9 @@ CONTAINS
          t_control%conv = ABS(t_control%conv)
 
       CALL section_vals_val_get(t_section, "SF", explicit=explicit)
-      IF (explicit) THEN 
+      IF (explicit) THEN
          t_control%do_sf = .TRUE.
-         CALL section_vals_val_get(t_section, "SF",i_val=t_control%sf_type)
+         CALL section_vals_val_get(t_section, "SF", i_val=t_control%sf_type)
       END IF
 
       ! DIPOLE_MOMENTS subsection
