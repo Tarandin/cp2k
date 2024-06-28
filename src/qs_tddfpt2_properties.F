@@ -143,19 +143,21 @@ CONTAINS
 !>       \f[\vec{r}\hat{H} - \hat{H}\vec{r} = [\vec{r},\hat{H}] = [\vec{r},-1/2 \nabla^2] = \nabla\f] .
 !>       \endparblock
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_dipole_operator(dipole_op_mos_occ, tddfpt_control, gs_mos, qs_env)
+   SUBROUTINE tddfpt_dipole_operator(dipole_op_mos_occ, tddfpt_control,gs_mos, qs_env, sf_gs)
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :), &
-         INTENT(inout)                                   :: dipole_op_mos_occ
-      TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
+         INTENT(inout)                                    :: dipole_op_mos_occ
+      TYPE(tddfpt2_control_type), POINTER                 :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
-         INTENT(in)                                      :: gs_mos
-      TYPE(qs_environment_type), POINTER                 :: qs_env
+         INTENT(in)                                       :: gs_mos
+      TYPE(qs_environment_type), POINTER                  :: qs_env
+      TYPE(cp_fm_type),DIMENSION(:), INTENT(IN), OPTIONAL :: sf_gs
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_dipole_operator'
 
       INTEGER                                            :: handle, i_cos_sin, icol, ideriv, irow, &
                                                             ispin, jderiv, nao, ncols_local, &
-                                                            ndim_periodic, nrows_local, nspins
+                                                            ndim_periodic,nrows_local,nspins,&
+                                                            jspin
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
       REAL(kind=dp)                                      :: eval_occ
@@ -177,13 +179,19 @@ CONTAINS
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(pw_poisson_type), POINTER                     :: poisson_env
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
+      LOGICAL                                            :: do_sf
 
       CALL timeset(routineN, handle)
 
       NULLIFY (blacs_env, cell, matrix_s, pw_env)
       CALL get_qs_env(qs_env, blacs_env=blacs_env, cell=cell, matrix_s=matrix_s, pw_env=pw_env)
 
+      do_sf = .FALSE.
+      IF (PRESENT(sf_gs)) do_sf = .TRUE.
+
       nspins = SIZE(gs_mos)
+      IF (do_sf) nspins = SIZE(sf_gs)
+
       CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=nao)
       DO ispin = 1, nspins
          nmo_occ(ispin) = SIZE(gs_mos(ispin)%evals_occ)
@@ -203,10 +211,12 @@ CONTAINS
       ! +++ allocate work matrices
       ALLOCATE (S_mos_virt(nspins))
       DO ispin = 1, nspins
-         CALL cp_fm_get_info(gs_mos(ispin)%mos_virt, matrix_struct=fm_struct)
+         jspin = ispin
+         IF (do_sf) jspin = 3-ispin
+         CALL cp_fm_get_info(gs_mos(jspin)%mos_virt, matrix_struct=fm_struct)
          CALL cp_fm_create(S_mos_virt(ispin), fm_struct)
          CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, &
-                                      gs_mos(ispin)%mos_virt, &
+                                      gs_mos(jspin)%mos_virt, &
                                       S_mos_virt(ispin), &
                                       ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
       END DO
@@ -252,6 +262,8 @@ CONTAINS
          ALLOCATE (gamma_00(nspins), gamma_inv_00(nspins), gamma_real_imag(2, nspins), opvec(2, nspins))
          ALLOCATE (dBerry_mos_occ(nderivs, nspins))
          DO ispin = 1, nspins
+            jspin = ispin
+            IF (do_sf) jspin = 3 - ispin
             NULLIFY (fm_struct)
             CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_occ(ispin), &
                                      ncol_global=nmo_occ(ispin), context=blacs_env)
@@ -265,7 +277,11 @@ CONTAINS
             CALL cp_fm_struct_release(fm_struct)
 
             ! G_real C_0, G_imag C_0
-            CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct)
+            IF (do_sf) THEN
+               CALL cp_fm_get_info(sf_gs(ispin), matrix_struct=fm_struct)
+            ELSE
+               CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct)
+            END IF
             DO i_cos_sin = 1, 2
                CALL cp_fm_create(opvec(i_cos_sin, ispin), fm_struct)
             END DO
@@ -286,22 +302,41 @@ CONTAINS
                                            berry_cossin_xyz(2)%matrix, kvec)
 
             DO ispin = 1, nspins
+               jspin = ispin
+               IF (do_sf) jspin = 3- ispin
                ! i_cos_sin = 1: cos (real) component; opvec(1) = gamma_real C_0
                ! i_cos_sin = 2: sin (imaginary) component; opvec(2) = gamma_imag C_0
                DO i_cos_sin = 1, 2
-                  CALL cp_dbcsr_sm_fm_multiply(berry_cossin_xyz(i_cos_sin)%matrix, &
-                                               gs_mos(ispin)%mos_occ, &
-                                               opvec(i_cos_sin, ispin), &
-                                               ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+                  IF (do_sf) THEN
+                     CALL cp_dbcsr_sm_fm_multiply(berry_cossin_xyz(i_cos_sin)%matrix, &
+                                                  sf_gs(ispin), &
+                                                  opvec(i_cos_sin, ispin), &
+                                                  ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+                  ELSE
+                     CALL cp_dbcsr_sm_fm_multiply(berry_cossin_xyz(i_cos_sin)%matrix, &
+                                                  gs_mos(ispin)%mos_occ, &
+                                                  opvec(i_cos_sin, ispin), &
+                                                  ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+                  END IF
                END DO
 
-               CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
-                                  1.0_dp, gs_mos(ispin)%mos_occ, opvec(1, ispin), &
-                                  0.0_dp, gamma_real_imag(1, ispin))
+               IF (do_sf) THEN
+                  CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
+                                     1.0_dp, sf_gs(ispin), opvec(1, ispin), &
+                                     0.0_dp, gamma_real_imag(1, ispin))
 
-               CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
-                                  -1.0_dp, gs_mos(ispin)%mos_occ, opvec(2, ispin), &
-                                  0.0_dp, gamma_real_imag(2, ispin))
+                  CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
+                                     -1.0_dp, sf_gs(ispin), opvec(2, ispin), &
+                                     0.0_dp, gamma_real_imag(2, ispin))
+               ELSE
+                  CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
+                                     1.0_dp, gs_mos(ispin)%mos_occ, opvec(1, ispin), &
+                                     0.0_dp, gamma_real_imag(1, ispin))
+
+                  CALL parallel_gemm('T', 'N', nmo_occ(ispin), nmo_occ(ispin), nao, &
+                                     -1.0_dp, gs_mos(ispin)%mos_occ, opvec(2, ispin), &
+                                     0.0_dp, gamma_real_imag(2, ispin))
+               END IF
 
                CALL cp_fm_to_cfm(msourcer=gamma_real_imag(1, ispin), &
                                  msourcei=gamma_real_imag(2, ispin), &
@@ -398,23 +433,35 @@ CONTAINS
          CALL cp_fm_struct_release(fm_struct)
 
          DO ispin = 1, nspins
+            jspin = ispin
+            IF (do_sf) jspin = 3-ispin 
             CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, matrix_struct=fm_struct)
             CALL cp_fm_create(rRc_mos_occ, fm_struct)
 
             ! wfm_ao_ao = S * mos_virt * mos_virt^T
-            CALL parallel_gemm('N', 'T', nao, nao, nmo_virt(ispin), &
-                               1.0_dp, S_mos_virt(ispin), gs_mos(ispin)%mos_virt, &
+            CALL parallel_gemm('N', 'T', nao, nao, nmo_virt(jspin), &
+                               1.0_dp, S_mos_virt(ispin), gs_mos(jspin)%mos_virt, &
                                0.0_dp, wfm_ao_ao)
 
             DO ideriv = 1, nderivs
-               CALL cp_dbcsr_sm_fm_multiply(rRc_xyz(ideriv)%matrix, &
-                                            gs_mos(ispin)%mos_occ, &
-                                            rRc_mos_occ, &
-                                            ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+               IF (do_sf) THEN
+                  CALL cp_dbcsr_sm_fm_multiply(rRc_xyz(ideriv)%matrix, &
+                                               sf_gs(ispin),&
+                                               rRc_mos_occ,&
+                                               ncol=nmo_occ(jspin), alpha=1.0_dp, beta=0.0_dp)
+                  CALL parallel_gemm('N', 'N', nao, nmo_occ(jspin), nao, &
+                                     1.0_dp, wfm_ao_ao, rRc_mos_occ, &
+                                     0.0_dp, dipole_op_mos_occ(ideriv, ispin))
+               ELSE
+                  CALL cp_dbcsr_sm_fm_multiply(rRc_xyz(ideriv)%matrix, &
+                                               gs_mos(ispin)%mos_occ, &
+                                               rRc_mos_occ, &
+                                               ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
 
-               CALL parallel_gemm('N', 'N', nao, nmo_occ(ispin), nao, &
-                                  1.0_dp, wfm_ao_ao, rRc_mos_occ, &
-                                  0.0_dp, dipole_op_mos_occ(ideriv, ispin))
+                  CALL parallel_gemm('N', 'N', nao, nmo_occ(ispin), nao, &
+                                     1.0_dp, wfm_ao_ao, rRc_mos_occ, &
+                                     0.0_dp, dipole_op_mos_occ(ideriv, ispin))
+               END IF
             END DO
 
             CALL cp_fm_release(rRc_mos_occ)
@@ -432,6 +479,8 @@ CONTAINS
                                    sab_nl=sab_orb)
 
          DO ispin = 1, nspins
+            jspin = ispin
+            IF (do_sf) jspin = ispin 
             NULLIFY (fm_struct)
             CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_virt(ispin), &
                                      ncol_global=nmo_occ(ispin), context=blacs_env)
@@ -445,28 +494,39 @@ CONTAINS
 
 !$OMP       PARALLEL DO DEFAULT(NONE), &
 !$OMP                PRIVATE(eval_occ, icol, irow), &
-!$OMP                SHARED(col_indices, gs_mos, ispin, local_data_ediff, ncols_local, nrows_local, row_indices)
+!$OMP                SHARED(col_indices, gs_mos, ispin,jspin, local_data_ediff, ncols_local, nrows_local, row_indices)
             DO icol = 1, ncols_local
                ! E_occ_i ; imo_occ = col_indices(icol)
-               eval_occ = gs_mos(ispin)%evals_occ(col_indices(icol))
+               eval_occ = gs_mos(jspin)%evals_occ(col_indices(icol))
 
                DO irow = 1, nrows_local
                   ! ediff_inv_weights(a, i) = 1.0 / (E_virt_a - E_occ_i)
                   ! imo_virt = row_indices(irow)
-                  local_data_ediff(irow, icol) = 1.0_dp/(gs_mos(ispin)%evals_virt(row_indices(irow)) - eval_occ)
+                  local_data_ediff(irow, icol) = 1.0_dp/(gs_mos(jspin)%evals_virt(row_indices(irow)) - eval_occ)
                END DO
             END DO
 !$OMP       END PARALLEL DO
 
             DO ideriv = 1, nderivs
-               CALL cp_dbcsr_sm_fm_multiply(scrm(ideriv + 1)%matrix, &
-                                            gs_mos(ispin)%mos_occ, &
-                                            dipole_op_mos_occ(ideriv, ispin), &
-                                            ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+               IF (do_sf) THEN
+                  CALL cp_dbcsr_sm_fm_multiply(scrm(ideriv + 1)%matrix, &
+                                               sf_gs(ispin), &
+                                               dipole_op_mos_occ(ideriv, ispin), &
+                                               ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
 
-               CALL parallel_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, &
-                                  1.0_dp, gs_mos(ispin)%mos_virt, dipole_op_mos_occ(ideriv, ispin), &
-                                  0.0_dp, wfm_mo_virt_mo_occ)
+                  CALL parallel_gemm('T', 'N', nmo_virt(jspin),nmo_occ(jspin), nao, &
+                                     1.0_dp, gs_mos(ispin)%mos_virt, dipole_op_mos_occ(ideriv, ispin), &
+                                     0.0_dp, wfm_mo_virt_mo_occ)
+               ELSE
+                  CALL cp_dbcsr_sm_fm_multiply(scrm(ideriv + 1)%matrix, &
+                                               gs_mos(ispin)%mos_occ, &
+                                               dipole_op_mos_occ(ideriv, ispin), &
+                                               ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+
+                  CALL parallel_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, &
+                                     1.0_dp, gs_mos(ispin)%mos_virt, dipole_op_mos_occ(ideriv, ispin), &
+                                     0.0_dp, wfm_mo_virt_mo_occ)
+               END IF
 
                ! in-place element-wise (Schur) product;
                ! avoid allocation of a temporary [nmo_virt x nmo_occ] matrix which is needed
@@ -482,7 +542,7 @@ CONTAINS
                END DO
 !$OMP          END PARALLEL DO
 
-               CALL parallel_gemm('N', 'N', nao, nmo_occ(ispin), nmo_virt(ispin), &
+               CALL parallel_gemm('N', 'N', nao, nmo_occ(ispin),nmo_virt(jspin), &
                                   1.0_dp, S_mos_virt(ispin), wfm_mo_virt_mo_occ, &
                                   0.0_dp, dipole_op_mos_occ(ideriv, ispin))
             END DO
@@ -632,7 +692,8 @@ CONTAINS
 !>    * 05.2016 created as 'tddfpt_print_summary' [Sergey Chulkov]
 !>    * 08.2018 splited of from 'tddfpt_print_summary' [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_print_excitation_analysis(log_unit, evects, evals, gs_mos, matrix_s, min_amplitude)
+   SUBROUTINE tddfpt_print_excitation_analysis(log_unit, evects,evals,gs_mos, matrix_s, min_amplitude,& 
+   do_sf)
       INTEGER, INTENT(in)                                :: log_unit
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: evects
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals
@@ -640,11 +701,12 @@ CONTAINS
          INTENT(in)                                      :: gs_mos
       TYPE(dbcsr_type), POINTER                          :: matrix_s
       REAL(kind=dp), INTENT(in)                          :: min_amplitude
+      LOGICAL, INTENT(IN)                                :: do_sf
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_print_excitation_analysis'
 
-      CHARACTER(len=5)                                   :: spin_label
-      INTEGER                                            :: handle, icol, iproc, irow, ispin, &
+      CHARACTER(len=5)                                   :: spin_label_occ, spin_label_virt
+      INTEGER                                            :: handle,icol,iproc, irow, ispin, jspin, &
                                                             istate, nao, ncols_local, nrows_local, &
                                                             nspins, nstates, state_spin
       INTEGER(kind=int_8)                                :: iexc, imo_occ, imo_virt, ind, nexcs, &
@@ -677,7 +739,7 @@ CONTAINS
       CALL cp_fm_get_info(gs_mos(1)%mos_occ, context=blacs_env, para_env=para_env)
       CALL dbcsr_get_info(matrix_s, nfullrows_total=nao)
 
-      DO ispin = 1, nspins
+      DO ispin = 1, SIZE(gs_mos)
          nmo_occ(ispin) = SIZE(gs_mos(ispin)%evals_occ)
          nmo_virt(ispin) = SIZE(gs_mos(ispin)%evals_virt)
          nmo_occ8(ispin) = SIZE(gs_mos(ispin)%evals_occ, kind=int_8)
@@ -698,23 +760,26 @@ CONTAINS
             WRITE (log_unit, '(8X,A,T28,A,T49,A,T69,A)') "number", "orbital", "orbital", "amplitude"
             WRITE (log_unit, '(1X,79("-"))')
 
-            IF (nspins == 1) THEN
+            IF (nspins == 1 .AND. .NOT.(do_sf)) THEN
                state_spin = 1
-               spin_label = '     '
+               spin_label_occ = '     '
+               spin_label_virt = spin_label_occ
             END IF
          END IF
 
          ALLOCATE (S_mos_virt(nspins), weights_fm(nspins))
          DO ispin = 1, nspins
-            CALL cp_fm_get_info(gs_mos(ispin)%mos_virt, matrix_struct=fm_struct)
+            jspin = ispin
+            IF (do_sf) jspin = 3-ispin
+            CALL cp_fm_get_info(gs_mos(jspin)%mos_virt, matrix_struct=fm_struct)
             CALL cp_fm_create(S_mos_virt(ispin), fm_struct)
             CALL cp_dbcsr_sm_fm_multiply(matrix_s, &
-                                         gs_mos(ispin)%mos_virt, &
+                                         gs_mos(jspin)%mos_virt, &
                                          S_mos_virt(ispin), &
-                                         ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
+                                         ncol=nmo_virt(jspin), alpha=1.0_dp, beta=0.0_dp)
 
             NULLIFY (fm_struct)
-            CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_virt(ispin), ncol_global=nmo_occ(ispin), &
+            CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_virt(jspin), ncol_global=nmo_occ(ispin), &
                                      context=blacs_env)
             CALL cp_fm_create(weights_fm(ispin), fm_struct)
             CALL cp_fm_struct_release(fm_struct)
@@ -736,7 +801,9 @@ CONTAINS
             ! excitations to the master node for subsequent ordering
             DO ispin = 1, nspins
                ! compute excitation amplitudes
-               CALL parallel_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, 1.0_dp, S_mos_virt(ispin), &
+               jspin = ispin
+               IF (do_sf) jspin = 3-ispin
+               CALL parallel_gemm('T', 'N', nmo_virt(jspin), nmo_occ(ispin), nao, 1.0_dp, S_mos_virt(ispin), &
                                   evects(ispin, istate), 0.0_dp, weights_fm(ispin))
 
                CALL cp_fm_get_info(weights_fm(ispin), nrow_local=nrows_local, ncol_local=ncols_local, &
@@ -752,12 +819,12 @@ CONTAINS
                         weights_local(nexcs_local) = local_data(irow, icol)
                         ! index of single excitation (ivirt, iocc, ispin) in compressed form
                         inds_local(nexcs_local) = nmo_virt_occ + INT(row_indices(irow), int_8) + &
-                                                  INT(col_indices(icol) - 1, int_8)*nmo_virt8(ispin)
+                                                  INT(col_indices(icol) - 1, int_8)*nmo_virt8(jspin)
                      END IF
                   END DO
                END DO
 
-               nmo_virt_occ = nmo_virt_occ + nmo_virt8(ispin)*nmo_occ8(ispin)
+               nmo_virt_occ = nmo_virt_occ + nmo_virt8(jspin)*nmo_occ8(ispin)
             END DO
 
             IF (para_env%is_source()) THEN
@@ -839,26 +906,41 @@ CONTAINS
                weights_neg_abs_recv(:) = -ABS(weights_recv)
                CALL sort(weights_neg_abs_recv, INT(nexcs), inds)
 
-               WRITE (log_unit, '(T7,I8,F10.5,A)') istate, evals(istate)*evolt, " eV"
+               IF (do_sf .AND. istate == 1) THEN
+                  WRITE (log_unit, '(T7,A,F10.5,A)') "  SF GS:", evals(istate)*evolt
+               ELSE
+                  WRITE (log_unit, '(T7,I8,F10.5,A)') istate, evals(istate)*evolt, " eV"
+               END IF
 
                DO iexc = 1, nexcs
                   ind = inds_recv(inds(iexc)) - 1
                   IF (nspins > 1) THEN
                      IF (ind < nmo_virt_occ_alpha) THEN
                         state_spin = 1
-                        spin_label = '(alp)'
+                        spin_label_occ = '(alp)'
+                        spin_label_virt = spin_label_occ
                      ELSE
                         state_spin = 2
                         ind = ind - nmo_virt_occ_alpha
-                        spin_label = '(bet)'
+                        spin_label_occ = '(bet)'
+                        spin_label_virt = spin_label_occ
                      END IF
+                  ELSE IF (do_sf) THEN
+                     state_spin = 1
+                     spin_label_occ = '(alp)'
+                     spin_label_virt = '(bet)'
                   END IF
 
-                  imo_occ = ind/nmo_virt8(state_spin) + 1
-                  imo_virt = MOD(ind, nmo_virt8(state_spin)) + 1
+                  IF (do_sf) THEN
+                     imo_occ = ind/nmo_virt8(3-state_spin) + 1
+                     imo_virt = MOD(ind, nmo_virt8(3-state_spin)) + 1
+                  ELSE
+                     imo_occ = ind/nmo_virt8(state_spin) + 1
+                     imo_virt = MOD(ind, nmo_virt8(state_spin)) + 1
+                  END IF
 
-                  WRITE (log_unit, '(T27,I8,1X,A5,T48,I8,1X,A5,T70,F9.6)') imo_occ, spin_label, &
-                     nmo_occ8(state_spin) + imo_virt, spin_label, weights_recv(inds(iexc))
+                  WRITE (log_unit,'(T27,I8,1X,A5,T48,I8,1X,A5,T70,F9.6)') imo_occ,spin_label_occ, &
+                     nmo_occ8(state_spin) + imo_virt, spin_label_virt, weights_recv(inds(iexc))
                END DO
             END IF
 

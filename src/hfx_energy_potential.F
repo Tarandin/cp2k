@@ -727,7 +727,7 @@ CONTAINS
                                   kind_of, basis_parameter, get_max_vals_spin=.FALSE., antisymmetric=is_anti_symmetric)
          END DO
 
-         IF (nspins == 2) THEN
+         IF (nspins == 2 .AND. SIZE(rho_ao,1) == 2) THEN
             ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), nkimages))
             DO img = 1, nkimages
                CALL get_full_density(para_env, full_density_beta(:, img), rho_ao(2, img)%matrix, shm_number_of_p_entries, &
@@ -798,7 +798,7 @@ CONTAINS
       full_ks_alpha = 0.0_dp
 
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) THEN
+         IF (nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
             ALLOCATE (shm_master_x_data%full_ks_beta(shm_block_offset(ncpu + 1), nkimages))
             full_ks_beta => shm_master_x_data%full_ks_beta
             full_ks_beta = 0.0_dp
@@ -1679,7 +1679,7 @@ CONTAINS
                               iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
                               atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
                            IF (.NOT. treat_lsd_in_core) THEN
-                              IF (nspins == 2) THEN
+                              IF (nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
                                  CALL update_fock_matrix( &
                                     nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                     fac, symm_fac, full_density_beta(:, 1), full_ks_beta(:, 1), &
@@ -1699,7 +1699,7 @@ CONTAINS
                               iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
                               atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
                            IF (.NOT. treat_lsd_in_core) THEN
-                              IF (nspins == 2) THEN
+                              IF (nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
                                  CALL update_fock_matrix_as( &
                                     nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                     fac, symm_fac, full_density_beta(:, 1), full_ks_beta(:, 1), &
@@ -1872,7 +1872,7 @@ CONTAINS
                         IF (i > j) THEN
                            full_ks_alpha(i, img) = (full_ks_alpha(i, img) + full_ks_alpha(j, img)*afac)
                            full_ks_alpha(j, img) = full_ks_alpha(i, img)*afac
-                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2) THEN
+                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
                               full_ks_beta(i, img) = (full_ks_beta(i, img) + full_ks_beta(j, img)*afac)
                               full_ks_beta(j, img) = full_ks_beta(i, img)*afac
                            END IF
@@ -1880,7 +1880,7 @@ CONTAINS
                         ! ** For adiabatically rescaled functionals we need the energy coming from the diagonal elements
                         IF (i == j) THEN
                            ene_x_aa_diag = ene_x_aa_diag + full_ks_alpha(i, img)*full_density_alpha(i, img)
-                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2) THEN
+                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
                               ene_x_bb_diag = ene_x_bb_diag + full_ks_beta(i, img)*full_density_beta(i, img)
                            END IF
                         END IF
@@ -1907,7 +1907,7 @@ CONTAINS
 
          NULLIFY (full_ks_alpha)
          DEALLOCATE (shm_master_x_data%full_ks_alpha)
-         IF (.NOT. treat_lsd_in_core) THEN
+         IF (.NOT. treat_lsd_in_core .AND. ASSOCIATED(full_density_beta)) THEN
             IF (nspins == 2) THEN
                DO img = 1, nkimages
                   CALL distribute_ks_matrix(para_env, full_ks_beta(:, img), ks_matrix(2, img)%matrix, shm_number_of_p_entries, &
@@ -1937,7 +1937,7 @@ CONTAINS
          END IF
 
          ene_x_bb = 0.0_dp
-         IF (nspins == 2 .AND. .NOT. treat_lsd_in_core) THEN
+         IF (nspins == 2 .AND. .NOT. treat_lsd_in_core .AND. ASSOCIATED(full_density_beta)) THEN
             DO img = 1, nkimages
                CALL dbcsr_dot(ks_matrix(2, img)%matrix, rho_ao(2, img)%matrix, &
                               etmp)
@@ -1963,7 +1963,7 @@ CONTAINS
          END DO
          ! ** Now correct
          ene_x_aa = (ene_x_aa + ene_x_aa_diag)*0.5_dp
-         IF (nspins == 2) THEN
+         IF (nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
             DO img = 1, nkimages
                DO pa = 1, SIZE(full_ks_beta, 1)
                   ene_x_bb = ene_x_bb + full_ks_beta(pa, img)*full_density_beta(pa, img)
@@ -2128,7 +2128,7 @@ CONTAINS
 !$OMP MASTER
       DEALLOCATE (full_density_alpha)
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) THEN
+         IF (nspins == 2 .AND. ASSOCIATED(full_density_beta)) THEN
             DEALLOCATE (full_density_beta)
          END IF
       END IF

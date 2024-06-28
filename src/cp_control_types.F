@@ -487,6 +487,9 @@ MODULE cp_control_types
       LOGICAL                              :: do_hfxlr = .FALSE.
       REAL(KIND=dp)                        :: hfxlr_rcut = 0.0_dp, hfxlr_scale = 0.0_dp
       LOGICAL                              :: do_exck = .FALSE.
+      !> do we want sf_calculations
+      LOGICAL                              :: do_sf = .FALSE.
+      INTEGER                              :: sf_type = 1
       !> options used in sTDA calculation (Kernel)
       TYPE(stda_control_type)              :: stda_control = stda_control_type()
       !> algorithm to correct orbital energies

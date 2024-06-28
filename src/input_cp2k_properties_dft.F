@@ -38,7 +38,7 @@ MODULE input_cp2k_properties_dft
       ot_precond_s_inverse, scan_x, scan_xy, scan_xyz, scan_xz, scan_y, scan_yz, scan_z, &
       tddfpt_dipole_berry, tddfpt_dipole_length, tddfpt_dipole_velocity, tddfpt_kernel_full, &
       tddfpt_kernel_none, tddfpt_kernel_stda, use_mom_ref_coac, use_mom_ref_com, &
-      use_mom_ref_user, use_mom_ref_zero
+      use_mom_ref_user, use_mom_ref_zero, tddfpt_sf_hs, tddfpt_sf_ls,tddfpt_sf_b
    USE input_cp2k_atprop, ONLY: create_atprop_section
    USE input_cp2k_dft, ONLY: create_ddapc_restraint_section, &
                              create_interp_section, &
@@ -1413,7 +1413,7 @@ CONTAINS
                           "Density Functional Perturbation Theory. "// &
                           "Current implementation works for hybrid functionals. "// &
                           "Can be used with Gaussian and Plane Waves (GPW) method only.", &
-                          n_keywords=12, n_subsections=4, repeats=.FALSE., &
+                          n_keywords=13, n_subsections=4, repeats=.FALSE., &
                           citations=(/Iannuzzi2005/))
 
       NULLIFY (keyword, print_key, subsection)
@@ -1577,6 +1577,19 @@ CONTAINS
                           "Options={small,medium,large,huge}", &
                           usage="AUTO_BASIS {basis_type} {basis_size}", &
                           type_of_var=char_t, repeats=.TRUE., n_var=-1, default_c_vals=(/"X", "X"/))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      ! Spin Flip TDDFT options
+      CALL keyword_create(keyword, __LOCATION__, name="SF", &
+                          description="Use Spin-Flip TDDFPT", &
+                          usage="SF HS/LS/BOTH", &
+                          enum_c_vals=s2a("HS","LS","BOTH"),&
+                          enum_desc=s2a("Spin Flip from alpha to beta",&
+                                       "Spin Flip from beta to alpha",&
+                                       "Allow for both variants"),&
+                          enum_i_vals=(/tddfpt_sf_hs,tddfpt_sf_ls,tddfpt_sf_b/),&
+                          default_i_val=tddfpt_sf_hs)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
