@@ -221,7 +221,7 @@ CONTAINS
 !>    * 02.2017 created [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, &
-                                         do_hfxlr, do_exck, do_sf qs_env, sub_env)
+                                         do_hfxlr, do_exck, do_sf, qs_env, sub_env)
       TYPE(tddfpt_work_matrices), INTENT(out)            :: work_matrices
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
