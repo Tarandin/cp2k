@@ -451,13 +451,18 @@ CONTAINS
 
       !print forces for selected states
       IF (calc_forces) THEN
-         CALL tddfpt_print_forces(qs_env, evects, evals, ostrength, &
+         IF (do_sf) THEN
+            CPWARN("Spin-Flip forces are not implemented yet!")
+         ELSE
+            CALL tddfpt_print_forces(qs_env, evects, evals, ostrength, &
                                   tddfpt_print_section, gs_mos, &
                                   kernel_env, sub_env, work_matrices)
+         END IF
       END IF
 
       ! excited state potential energy surface
       IF (qs_env%excited_state) THEN
+         IF (do_sf .AND. calc_forces) CPABORT("Spin-Flip forces not available")
          IF (sub_env%is_split) THEN
             CALL cp_abort(__LOCATION__, &
                           "Excited state forces not possible when states"// &
@@ -523,7 +528,7 @@ CONTAINS
                my_state, "      with excitation energy ", ex_env%evalue*evolt, " eV"
          END IF
 
-         IF (calc_forces) THEN
+         IF (calc_forces .AND. .NOT. (do_sf)) THEN
             CALL tddfpt_forces_main(qs_env, gs_mos, ex_env, kernel_env, &
                                     sub_env, work_matrices)
          END IF
@@ -1182,7 +1187,8 @@ CONTAINS
                                 ostrength, &
                                 mult, &
                                 dipole_op_mos_occ, &
-                                tddfpt_control%dipole_form)
+                                tddfpt_control%dipole_form,&
+                                do_sf)
       CALL tddfpt_print_excitation_analysis( &
          log_unit, &
          evects, &
